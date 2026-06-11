@@ -351,6 +351,8 @@ Request: `audio/wav` / `audio/pcm` / `multipart/form-data`
 }
 ```
 
+Agent バックエンド失敗時（タイムアウト / 接続失敗 / 不正応答）は **HTTP 5xx を返さず、200 + 安全フォールバック応答**（中立的な定型メッセージ）を返す。firmware の会話ループを 1 ターンの失敗で壊さないため（§13 安定性 / ADR-0005）。`POST /api/agent/proactive`（§11.7）も同方針。
+
 ### 11.4 画像認識 — `POST /api/vision/detect`
 
 Request: `image/jpeg` / `image/raw` / `multipart/form-data`
@@ -400,7 +402,9 @@ Request: `image/jpeg` / `image/raw` / `multipart/form-data`
 
 CoreS3 側検知の同時有効数には上限を設け、超過分は PC 側検知へ委譲または無効として返す。
 
-### 11.7 自発話しかけ Agent リクエスト
+### 11.7 自発話しかけ Agent リクエスト — `POST /api/agent/proactive`
+
+device 側イベント（注視検出等）から自発話しかけを生成する。レスポンスは §11.3 chat と同一スキーマ。実装の差分（`proactive_speak` は `{type, value}` 形）は `docs/backend-api.md` を参照。
 
 ```jsonc
 // Request（バックエンド → Agent）
@@ -460,6 +464,7 @@ CoreS3 側検知の同時有効数には上限を設け、超過分は PC 側検
 - Wi-Fi 切断時に復帰できる
 - バックエンド未起動 / API タイムアウト時に落ちない
 - 音声認識失敗時に会話ループが壊れない
+- Agent 実行失敗時も会話ループが壊れない（backend は 5xx ではなく 200 + 安全フォールバック応答を返す。§11.3 / ADR-0005）
 - バージイン誤検知（エコー・環境音）で Bot 発話が不必要に中断され続けない
 - カメラ失敗時に Bot 全体が停止しない
 - 設定読み込み失敗時はデフォルト値で起動する
