@@ -10,6 +10,8 @@ dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "sqlmodel>=0.0.21",
+    # OpenAI-compatible AgentGateway transport (infrastructure/agent).
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]

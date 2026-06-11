@@ -36,3 +36,25 @@ class AgentReply:
     text: str
     emotion: str = "neutral"
     actions: tuple[AgentAction, ...] = ()
+
+
+@dataclass(frozen=True)
+class ProactiveEvent:
+    """A device-side event that may trigger a proactive utterance.
+
+    Mirrors the §11.7 request body (event_type + context). ``attention_detected``
+    is the primary trigger; future event types reuse the same shape.
+    """
+
+    event_type: str
+    context: tuple[tuple[str, object], ...] = ()
+
+    @classmethod
+    def from_context(cls, *, event_type: str, context: dict[str, object] | None) -> ProactiveEvent:
+        """Build an event, freezing the (mutable) context dict into a tuple."""
+        items = tuple(sorted((context or {}).items()))
+        return cls(event_type=event_type, context=items)
+
+    def context_dict(self) -> dict[str, object]:
+        """Return the context as a plain dict (for adapters / prompts)."""
+        return dict(self.context)

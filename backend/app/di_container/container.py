@@ -18,7 +18,7 @@ from app.application.ports.speech_recognizer import SpeechRecognizer
 from app.application.ports.vision_recognizer import VisionRecognizer
 from app.application.ports.wakeword_detector import WakeWordDetector
 from app.config.settings import AppSettings, get_settings
-from app.infrastructure.agent.dummy_agent_gateway import DummyAgentGateway
+from app.infrastructure.agent.registry import build_agent_gateway
 from app.infrastructure.persistence.sqlite_settings_repository import SqliteSettingsRepository
 from app.infrastructure.speech.dummy_speech_recognizer import DummySpeechRecognizer
 from app.infrastructure.transport.in_memory_bot_event_publisher import InMemoryBotEventPublisher
@@ -32,7 +32,9 @@ class Container:
     def __init__(self, settings: AppSettings) -> None:
         self._settings = settings
         self._repository: SettingsRepository = SqliteSettingsRepository(settings.database_url)
-        self._agent_gateway: AgentGateway = DummyAgentGateway()
+        # Provider resolved via the registry (no if-branching); default is
+        # OpenAICompatible (design-spec §11.3 / CLAUDE.md).
+        self._agent_gateway: AgentGateway = build_agent_gateway(settings)
         self._speech_recognizer: SpeechRecognizer = DummySpeechRecognizer()
         self._vision_recognizer: VisionRecognizer = DummyVisionRecognizer()
         self._wakeword_detector: WakeWordDetector = DummyWakeWordDetector()
