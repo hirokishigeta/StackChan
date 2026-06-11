@@ -56,6 +56,15 @@ class AgentChatResponse(BaseModel):
     actions: list[AgentActionSchema]
 
 
+# --- Proactive talk Agent request (§11.7) --------------------------------
+
+
+class AgentProactiveRequest(BaseModel):
+    device_id: str
+    event_type: str = "attention_detected"
+    context: dict[str, object] = Field(default_factory=dict)
+
+
 # --- Vision detect (§11.4) -----------------------------------------------
 
 

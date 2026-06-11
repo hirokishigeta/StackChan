@@ -31,9 +31,9 @@ def test_register_bot_returns_settings(client: TestClient) -> None:
     assert "wake_word" in body["settings"]
 
 
-def test_agent_chat_dummy(client: TestClient) -> None:
-    _register(client)
-    resp = client.post(
+def test_agent_chat_dummy(dummy_agent_client: TestClient) -> None:
+    _register(dummy_agent_client)
+    resp = dummy_agent_client.post(
         "/api/agent/chat",
         json={"device_id": "cores3-001", "message": "こんにちは", "context": {}},
     )

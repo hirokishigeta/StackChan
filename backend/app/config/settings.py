@@ -27,9 +27,20 @@ class AppSettings(BaseSettings):
     # CORS: LAN-only by default (design-spec §13 security).
     cors_allow_origins: list[str] = ["*"]
 
-    # Dummy defaults for the agent / speech layers (replaced in later phases).
+    # Agent provider selection (resolved via a registry in di_container; the
+    # value must match an AgentType, e.g. "OpenAICompatible"). No if-based
+    # provider branching (CLAUDE.md / design-spec §13).
     default_agent_type: str = "OpenAICompatible"
     default_agent_model: str = "dummy-model"
+
+    # OpenAI-compatible Gateway (design-spec §11.3). base_url / api_key / model
+    # are never hard-coded outside this module (CLAUDE.md).
+    agent_base_url: str = "http://localhost:11434/v1"
+    agent_api_key: str = ""
+    # Per-request timeout in seconds. On timeout the gateway raises AgentError
+    # and the API returns a safe fallback so the conversation loop survives.
+    agent_request_timeout_s: float = 30.0
+
     default_speech_provider: str = "dummy"
     default_speech_language: str = "ja"
 

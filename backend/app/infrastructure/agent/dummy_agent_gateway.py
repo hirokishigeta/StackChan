@@ -1,20 +1,19 @@
-"""Dummy AgentGateway returning a fixed reply.
+"""Dummy AgentGateway returning fixed replies.
 
-TODO(issue#6): replace with real OpenAI-compatible / HermesAgent / OpenClaw
-adapters. Per ADR-0004, firmware speaks the xiaozhi-compatible message
-schema; the backend exposes the design-spec §11 API and an adapter bridges
-the two.
+Used as a test fixture and as an explicit no-network fallback. The real
+provider is :class:`OpenAICompatibleGateway`; see ADR-0004 for how firmware's
+xiaozhi-compatible messages are bridged to the design-spec §11 API.
 """
 
 from __future__ import annotations
 
 from app.application.ports.agent_gateway import AgentGateway
 from app.domain.agent.entities import AgentProfile
-from app.domain.agent.value_objects import AgentAction, AgentReply
+from app.domain.agent.value_objects import AgentAction, AgentReply, ProactiveEvent
 
 
 class DummyAgentGateway(AgentGateway):
-    """Returns a canned response regardless of input."""
+    """Returns canned responses regardless of input."""
 
     async def chat(
         self,
@@ -27,4 +26,19 @@ class DummyAgentGateway(AgentGateway):
             text="こんにちは、今日は何をしますか？",
             emotion="happy",
             actions=(AgentAction(type="set_expression", value="happy"),),
+        )
+
+    async def proactive(
+        self,
+        *,
+        event: ProactiveEvent,
+        profile: AgentProfile,
+    ) -> AgentReply:
+        return AgentReply(
+            text="なにか手伝おうか？",
+            emotion="curious",
+            actions=(
+                AgentAction(type="set_expression", value="curious"),
+                AgentAction(type="proactive_speak", value=event.event_type),
+            ),
         )
