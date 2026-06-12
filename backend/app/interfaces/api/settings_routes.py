@@ -15,7 +15,11 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from app.application.use_cases.manage_settings import ManageSettingsUseCase
 from app.di_container.dependencies import get_settings_use_case
 from app.domain.settings.entities import BotSettings
-from app.infrastructure.persistence.serialization import settings_from_dict, settings_to_dict
+from app.infrastructure.persistence.serialization import (
+    settings_from_dict,
+    settings_to_dict,
+    validate_enum_inputs,
+)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -41,7 +45,16 @@ def update_settings(
     use_case: Annotated[ManageSettingsUseCase, Depends(get_settings_use_case)],
     body: dict[str, Any] = _SETTINGS_BODY,
 ) -> dict[str, Any]:
-    """Update (merge over current/defaults) and return the settings aggregate."""
+    """Update (merge over current/defaults) and return the settings aggregate.
+
+    User input is validated strictly: an unknown enum value is rejected with
+    HTTP 422 rather than silently coerced to a default (the lenient fallback in
+    ``settings_from_dict`` is reserved for the load path, design-spec §13).
+    """
+    try:
+        validate_enum_inputs(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     current = use_case.get_settings(device_id) or BotSettings.default(device_id)
     merged = {**settings_to_dict(current), **body}
     updated = use_case.update_settings(settings_from_dict(device_id, merged))
