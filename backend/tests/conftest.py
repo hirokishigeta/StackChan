@@ -21,6 +21,22 @@ from app.main import create_app
 from fastapi.testclient import TestClient
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _ignore_local_env_file() -> Iterator[None]:
+    """Make the whole suite hermetic w.r.t. a developer-local ``backend/.env``.
+
+    ``AppSettings`` loads ``.env`` by default; a local file that selects real
+    providers (e.g. sherpa-onnx) would otherwise break provider-default tests.
+    Disable env-file loading for every ``AppSettings()`` built during tests.
+    """
+    original = AppSettings.model_config.get("env_file")
+    AppSettings.model_config["env_file"] = None
+    try:
+        yield
+    finally:
+        AppSettings.model_config["env_file"] = original
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     """Run ``@pytest.mark.anyio`` tests on asyncio only (no trio dep)."""
@@ -58,7 +74,10 @@ def _make_container(
     audio_encoder: object | None = None,
 ) -> container_module.Container:
     db_path = f"{tmp_path}/test.db"  # type: ignore[str-bytes-safe]
-    test_settings = AppSettings(database_url=f"sqlite:///{db_path}")
+    # Tests must be hermetic: ignore any developer-local backend/.env so settings
+    # fall back to code defaults (dummy providers). Otherwise a local .env that
+    # selects e.g. sherpa-onnx would break provider-default tests.
+    test_settings = AppSettings(_env_file=None, database_url=f"sqlite:///{db_path}")
     container = container_module.Container(test_settings)
     if gateway is not None:
         container._agent_gateway = gateway  # noqa: SLF001  (test-only injection)

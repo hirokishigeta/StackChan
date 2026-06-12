@@ -72,4 +72,34 @@ the two.
 SQLite via SQLModel/SQLAlchemy (`STACKCHAN_DATABASE_URL`, default
 `sqlite:///./stackchan.db`). The settings aggregate is stored as JSON; the
 `SettingsRepository` port keeps persistence out of the domain.
+
+## Running with real models (ASR / audio)
+
+Providers are dummy by default so `make check` runs with no native deps. To run
+real recognition/audio, install the optional extras and point settings at model
+files. Copy `.env.example` to `.env` and fill it in (`.env` is gitignored).
+
+```bash
+# 1) optional native extras (sherpa-onnx ASR + libopus binding)
+uv sync --extra dev --extra sherpa --extra opus
+#    macOS arm64: the PyPI sherpa-onnx wheel ships no onnxruntime; pyproject's
+#    [tool.uv] find-links + the `sherpa-onnx-core` dep pull the bundled official
+#    k2-fsa wheel automatically. libopus: `brew install opus`.
+
+# 2) Japanese ASR model (ReazonSpeech zipformer transducer)
+wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zipformer-ja-reazonspeech-2024-08-01.tar.bz2
+tar xjf sherpa-onnx-zipformer-ja-reazonspeech-2024-08-01.tar.bz2
+
+# 3) point .env at the 4 model files (see .env.example) and set STACKCHAN_OTA_WS_HOST
+#    to the backend's LAN IP, then run including the extras:
+uv run --extra sherpa --extra opus uvicorn app.main:app --host 0.0.0.0
+```
+
+> The Python version is pinned to 3.13 (`.python-version`): the ML wheels
+> (sherpa-onnx / torch) do not yet ship for 3.14. Tests are hermetic w.r.t. a
+> local `.env` (conftest disables env-file loading).
+
+Downlink TTS (Irodori-TTS, ADR-0006) needs the `[tts]` extra + a GPU and its
+adapter is still a TODO (#7-b); keep `STACKCHAN_DEFAULT_TTS_PROVIDER=dummy`
+(text-only downlink) until that is wired on a GPU host.
 ```
