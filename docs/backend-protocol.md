@@ -247,6 +247,51 @@ backend 連携では `Ota` 経由をやめ、**Setup/BLE 経路で NVS `websocke
 - 残作業（#3 で実施）: activation 必須化を外し、起動時に直接 `OpenAudioChannel`（NVS `websocket`）へ進めるようにする。
   具体的な無効化方法（Kconfig / パッチ / 起動フロー分岐）は #3 の実装で確定（本書は方針のみ）。
 
+### 5.3 OTA チェック応答契約（backend が xiaozhi 互換で返す。Issue #23 / ADR-0007）
+
+§5.1 の NVS `websocket` を Setup/BLE から埋める経路に加え、**backend が OTA チェック応答で
+`websocket` セクションを返すことで firmware に WebSocket を選ばせる**経路を実装する（#23）。
+これは `wifi.ota_url` を backend に向ける #5（PR #22, `backend_config.cc`）の対向となる必須実装。
+
+**`Ota::CheckVersion`（`ota.cc:77-245`）の実リクエスト**:
+
+| 項目 | 値 | 出典 |
+|---|---|---|
+| メソッド | `POST`（`GetSystemInfoJson` が非空のため。`ota.cc:93-95`） | `ota.cc:93` |
+| URL | `wifi.ota_url`（#5 で backend に向く。例 `http://<host>:8000/api/ota/check`） | `ota.cc:46-53` |
+| ヘッダ | `Device-Id`(MAC) / `Client-Id`(UUID) / `User-Agent` / `Content-Type: application/json` / `Activation-Version`(1 or 2) / `Accept-Language` / 任意で `Serial-Number` | `ota.cc:55-72` |
+| ボディ | `Board::GetSystemInfoJson`: `version`, `flash_size`, `application.{name,version,...}` 等 | `board.cc:70-` |
+
+**backend 応答（device 識別は `Device-Id` ヘッダ = MAC を正とする。§5.1）**:
+
+```json
+{
+  "websocket": { "url": "ws://<host>:<port>/api/bot/<device_id>/audio", "token": "", "version": 2 },
+  "firmware":  { "version": "<device 現バージョン>" }
+}
+```
+
+- `websocket` の **キーは `url` / `token` / `version` の 3 つ**（`websocket_protocol.cc:84-87` が `GetString("url")`/`GetString("token")`/`GetInt("version")` で読む）。firmware は `websocket` セクションの有無だけで WS を選ぶ（`Ota::HasWebsocketConfig()` = `cJSON_GetObjectItem(root,"websocket")` がオブジェクトか、`ota.cc:167-186`）。
+- **`activation` は返さない** → device はクラウド activation をスキップ（`ota.cc:122-144`）。
+- **`mqtt` は返さない** → firmware は MQTT を WebSocket より優先する（`application.cc:480`）ため、MQTT を返すと WS が選ばれない。
+- `firmware.version` は device の現バージョンをそのまま返し、**`url` を付けない**。両方揃って初めて `has_new_version_` が立つ（`ota.cc:225-238`）ため、これでアップグレードは誘発されない（backend はファーム配信をしない）。
+- `url` のスキーム/ホスト/ポート・`token`・`version` はすべて config（`ota_ws_*`、§下表）由来。`device_id` は `Device-Id` ヘッダから URL を組む。**ハードコード禁止**（CLAUDE.md）。
+
+> §5.1 の「NVS を Setup/BLE で埋める」経路と本節の「OTA 応答で返す」経路は併存可。OTA 応答が来れば
+> `Ota` が NVS `websocket` を上書きする（`ota.cc:170-182`）ため、device 側の手動設定なしで接続が成立する。
+
+| config キー（`STACKCHAN_` prefix / `app/config/settings.py`） | 既定 | 用途 |
+|---|---|---|
+| `ota_ws_scheme` | `ws` | WS URL スキーム |
+| `ota_ws_host` | `127.0.0.1` | **要デプロイ上書き**（device から到達可能な LAN アドレス） |
+| `ota_ws_port` | `8000` | WS URL ポート |
+| `ota_ws_path_prefix` | `/api/bot` | 音声 WS のパス接頭辞（`bot_audio_ws` ルータと一致） |
+| `ota_ws_version` | `2` | `websocket.version`（Protocol-Version） |
+| `ota_ws_token` | `""` | `websocket.token`（空なら Authorization なし） |
+
+実装: `backend/app/interfaces/api/ota_routes.py`（`POST /api/ota/check`）。未登録 device は本応答時に
+`RegisterBotUseCase` で登録（OTA チェックが device の初回接触のため。`/api/bot/register` と整合）。
+
 ---
 
 ## 6. ターン管理/バージイン（design-spec §7）と xiaozhi listen mode の対応
