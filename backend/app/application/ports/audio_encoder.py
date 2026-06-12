@@ -26,6 +26,18 @@ class AudioEncodeError(RuntimeError):
 class AudioEncoder(ABC):
     """Abstraction over a downlink audio codec (PCM16 -> Opus frames)."""
 
+    def for_session(self) -> AudioEncoder:
+        """Return an encoder instance scoped to a single WS session.
+
+        Stateful codecs (libopus) keep per-stream state, so each connection
+        must own its own encoder — sharing one across concurrent sessions
+        interleaves frames from different streams and corrupts the output
+        (Issue #27). Stateless implementations (raw pass-through, test fakes)
+        override nothing and safely return ``self``; stateful ones return a
+        fresh instance. The WS handler calls this once at connection start.
+        """
+        return self
+
     @abstractmethod
     def encode(self, *, pcm: bytes, audio_format: AudioFormat) -> list[bytes]:
         """Encode little-endian PCM16 mono into a list of Opus frame payloads.

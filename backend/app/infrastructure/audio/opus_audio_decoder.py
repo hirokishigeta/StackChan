@@ -30,6 +30,18 @@ class OpusAudioDecoder(AudioDecoder):
         self._decoders: dict[tuple[int, int], Any] = {}
         self._decoder_cls: Callable[..., Any] | None = None
 
+    def for_session(self) -> OpusAudioDecoder:
+        """Return a fresh decoder so each WS session owns its libopus state.
+
+        libopus decoders are stateful per stream; the container-held instance
+        must not be shared across concurrent connections (Issue #27). The
+        resolved binding class is carried over so the new instance does not
+        re-import opuslib.
+        """
+        fresh = OpusAudioDecoder()
+        fresh._decoder_cls = self._decoder_cls
+        return fresh
+
     def _resolve_decoder_cls(self) -> Callable[..., Any]:
         if self._decoder_cls is not None:
             return self._decoder_cls

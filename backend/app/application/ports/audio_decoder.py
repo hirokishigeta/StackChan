@@ -26,6 +26,18 @@ class AudioDecodeError(RuntimeError):
 class AudioDecoder(ABC):
     """Abstraction over an uplink audio codec (e.g. Opus -> PCM16)."""
 
+    def for_session(self) -> AudioDecoder:
+        """Return a decoder instance scoped to a single WS session.
+
+        Stateful codecs (libopus) keep per-stream state, so each connection
+        must own its own decoder — sharing one across concurrent sessions
+        interleaves frames from different streams and corrupts the output
+        (Issue #27). Stateless implementations (raw pass-through, test fakes)
+        override nothing and safely return ``self``; stateful ones return a
+        fresh instance. The WS handler calls this once at connection start.
+        """
+        return self
+
     @abstractmethod
     def decode(self, *, payload: bytes, audio_format: AudioFormat) -> bytes:
         """Decode one encoded frame into little-endian PCM16 mono bytes.
