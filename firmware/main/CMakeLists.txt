@@ -306,13 +306,14 @@ idf_component_register(SRCS ${SOURCES}
                         esp_driver_ppa
                         esp_app_format
                         app_update
+                        esp_http_client
+                        esp_https_ota
                         spi_flash
                         console
                         efuse
                         bt
                         fatfs
                         ArduinoJson
-                        esp-now
                         mooncake
                         mooncake_log
                         smooth_ui_toolkit

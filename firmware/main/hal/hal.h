@@ -236,12 +236,6 @@ public:
     void setTimezone(std::string_view tz);
     std::string getTimezone();
 
-    /* --------------------------------- EspNow --------------------------------- */
-    uitk::Signal<const std::vector<uint8_t>&> onEspNowData;
-    void startEspNow(int channel);
-    bool espNowSend(const std::vector<uint8_t>& data, const uint8_t* destAddr = nullptr);
-    void setLaserEnabled(bool enabled);
-
     /* ------------------------------- Warm Reboot ------------------------------ */
     void requestWarmReboot(int appIndex);
     int getWarmRebootTarget();
