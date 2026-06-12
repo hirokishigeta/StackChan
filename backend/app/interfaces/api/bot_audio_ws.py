@@ -9,7 +9,12 @@ xiaozhi-compatible wire protocol (docs/backend-protocol.md §2/§3, ADR-0004):
   (SpeechRecognizer port) -> reply via AgentGateway.chat -> downlink control
   JSON ``stt`` (user text) / ``llm`` (emotion) / ``tts`` (sentence_start text).
 
-Out of scope for #7-a (left as TODO(issue#7b)): downlink TTS *audio* frames.
+#7-b adds the downlink TTS *audio* frames between ``tts.start`` and ``tts.stop``:
+reply text -> SpeechSynthesizer port (text [+emotion] -> PCM) -> resample to the
+negotiated downlink rate -> AudioEncoder port (PCM -> Opus) -> binary frames via
+``encode_frame``. If synthesis/encoding is unavailable, the turn degrades to
+text only (the #7-a behaviour) and the connection stays alive (design-spec §13).
+
 This layer is presentation only: it calls application ports resolved by the
 container; no business logic lives here (CLAUDE.md layer rules).
 """
@@ -24,14 +29,22 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.application.ports.agent_gateway import AgentError, AgentGateway
 from app.application.ports.audio_decoder import AudioDecodeError, AudioDecoder
+from app.application.ports.audio_encoder import AudioEncodeError, AudioEncoder
 from app.application.ports.settings_repository import SettingsRepository
 from app.application.ports.speech_recognizer import SpeechRecognizer
+from app.application.ports.speech_synthesizer import SpeechSynthesisError, SpeechSynthesizer
 from app.config.settings import AppSettings
 from app.di_container import container as container_module
 from app.domain.agent.entities import AgentProfile
+from app.domain.agent.value_objects import AgentReply
 from app.domain.speech.entities import SpeechRecognitionConfig
 from app.domain.speech.value_objects import AudioFormat
-from app.infrastructure.transport.audio_frame_codec import AudioFrameError, decode_frame
+from app.infrastructure.audio.resample import resample_pcm16
+from app.infrastructure.transport.audio_frame_codec import (
+    AudioFrameError,
+    decode_frame,
+    encode_frame,
+)
 
 router = APIRouter(prefix="/api/bot", tags=["bot-audio"])
 
@@ -66,12 +79,16 @@ class BotAudioHandler:
         speech_recognizer: SpeechRecognizer,
         agent_gateway: AgentGateway,
         audio_decoder: AudioDecoder,
+        speech_synthesizer: SpeechSynthesizer,
+        audio_encoder: AudioEncoder,
         repository: SettingsRepository,
     ) -> None:
         self._settings = settings
         self._asr = speech_recognizer
         self._agent = agent_gateway
         self._decoder = audio_decoder
+        self._synthesizer = speech_synthesizer
+        self._encoder = audio_encoder
         self._repository = repository
 
     async def run(self, websocket: WebSocket, device_id: str) -> None:
@@ -216,11 +233,44 @@ class BotAudioHandler:
             return
         # Emotion -> expression (xiaozhi `llm`, §2.2 -> firmware SetEmotion).
         await ws.send_json({"type": "llm", "emotion": reply.emotion})
-        # Assistant text. #7-a returns text only; #7-b adds the TTS audio frames
-        # between tts.start and tts.stop. TODO(issue#7b): synthesize + Opus enc.
+        # tts.start -> (downlink Opus audio frames) -> sentence_start text ->
+        # tts.stop. The audio frames are #7-b; the JSON sequence is unchanged
+        # from #7-a so the device's existing path keeps working.
         await ws.send_json({"type": "tts", "state": "start"})
         await ws.send_json({"type": "tts", "state": "sentence_start", "text": reply.text})
+        await self._send_tts_audio(ws, session, reply)
         await ws.send_json({"type": "tts", "state": "stop"})
+
+    async def _send_tts_audio(self, ws: WebSocket, session: _Session, reply: AgentReply) -> None:
+        """Synthesize the reply and send downlink Opus frames (#7-b).
+
+        On any synthesis/encoding failure (engine not installed, model unset,
+        codec missing) this degrades to a text-only turn: the JSON stream is
+        already complete, so we simply skip the audio and keep the connection
+        alive (design-spec §13).
+        """
+        downlink = AudioFormat(
+            codec="opus",
+            sample_rate=self._settings.downlink_sample_rate,
+            channels=self._settings.downlink_channels,
+            frame_duration_ms=self._settings.downlink_frame_duration_ms,
+        )
+        try:
+            audio = self._synthesizer.synthesize(text=reply.text, emotion=reply.emotion)
+            pcm = resample_pcm16(
+                pcm=audio.pcm,
+                src_rate=audio.sample_rate,
+                dst_rate=downlink.sample_rate,
+            )
+            payloads = self._encoder.encode(pcm=pcm, audio_format=downlink)
+        except (SpeechSynthesisError, AudioEncodeError, ValueError):
+            # Text-only fallback (#7-a behaviour). Connection stays alive.
+            return
+        for payload in payloads:
+            if session.aborted:
+                return
+            frame = encode_frame(payload=payload, version=session.binary_version)
+            await ws.send_bytes(frame)
 
     def _resolve_profile(self, device_id: str) -> AgentProfile:
         settings = self._repository.get_settings(device_id)
@@ -236,6 +286,8 @@ async def bot_audio(websocket: WebSocket, device_id: str) -> None:
         speech_recognizer=container.speech_recognizer,
         agent_gateway=container.agent_gateway,
         audio_decoder=container.audio_decoder,
+        speech_synthesizer=container.speech_synthesizer,
+        audio_encoder=container.audio_encoder,
         repository=container.repository,
     )
     await handler.run(websocket, device_id)

@@ -54,6 +54,8 @@ def _make_container(
     *,
     speech_recognizer: object | None = None,
     audio_decoder: object | None = None,
+    speech_synthesizer: object | None = None,
+    audio_encoder: object | None = None,
 ) -> container_module.Container:
     db_path = f"{tmp_path}/test.db"  # type: ignore[str-bytes-safe]
     test_settings = AppSettings(database_url=f"sqlite:///{db_path}")
@@ -64,6 +66,10 @@ def _make_container(
         container._speech_recognizer = speech_recognizer  # type: ignore[assignment]  # noqa: SLF001
     if audio_decoder is not None:
         container._audio_decoder = audio_decoder  # type: ignore[assignment]  # noqa: SLF001
+    if speech_synthesizer is not None:
+        container._speech_synthesizer = speech_synthesizer  # type: ignore[assignment]  # noqa: SLF001
+    if audio_encoder is not None:
+        container._audio_encoder = audio_encoder  # type: ignore[assignment]  # noqa: SLF001
     return container
 
 
@@ -98,12 +104,16 @@ def audio_ws_client_factory(
         gateway: AgentGateway | None = None,
         speech_recognizer: object | None = None,
         audio_decoder: object | None = None,
+        speech_synthesizer: object | None = None,
+        audio_encoder: object | None = None,
     ) -> TestClient:
         container = _make_container(
             tmp_path,
             gateway=gateway,
             speech_recognizer=speech_recognizer,
             audio_decoder=audio_decoder,
+            speech_synthesizer=speech_synthesizer,
+            audio_encoder=audio_encoder,
         )
         cm = _client_with_container(container)
         client = cm.__enter__()

@@ -148,8 +148,10 @@ backend は device の hello `version` に合わせて同じ形式で送受信�
 ### 3.2 backend 側で必要な Opus enc/dec
 
 - 上り: Opus(16k/mono/60ms) **デコード** → PCM → SpeechRecognizer port へ。
-- 下り: TTS PCM → Opus(24k/60ms) **エンコード** → バイナリフレーム化。
-- 推測: Python では `opuslib` 系 / `PyOgg` 等が候補。provider 選定は §7 未決事項。
+- 下り: TTS 48k PCM → **48k→24k リサンプル** → Opus(24k/60ms) **エンコード** → バイナリフレーム化（#7-b 実装済み）。
+- 実装（#7-a/#7-b）: `opuslib`（libopus バインディング）を採用。`AudioDecoder` / `AudioEncoder`
+  port + `infrastructure/audio` 具象（`opus` / `raw`）で registry 解決。native dep は optional
+  extra `[opus]` + 遅延ロード。リサンプルは依存なしの線形補間（`infrastructure/audio/resample.py`）。
 
 ---
 
@@ -194,18 +196,25 @@ backend の WS ハンドラは `interfaces/`（プレゼンテーション層）
 | 認識テキスト → 応答生成 | `AgentGateway.chat(...)`（`agent_gateway.py`） | 既存・実動（OpenAICompatible） |
 | device イベント → 自発話 | `AgentGateway.proactive(...)` | 既存 |
 | 下り制御イベント配信 | `BotEventPublisher`（`bot_event_publisher.py`） | 既存（現状ポーリング、WS 化は #8） |
-| TTS 合成 | （新規 port が必要。推測: `SpeechSynthesizer` ABC） | **未定義**。#7 で TTS port を新設するか要検討（§7） |
+| TTS 合成 | `SpeechSynthesizer`（`application/ports/speech_synthesizer.py`） | **新設済み（#7-b）**。具象は Irodori-TTS（ADR-0006）。dummy 既定 |
+| 下り Opus enc | `AudioEncoder`（`application/ports/audio_encoder.py`） | **新設済み（#7-b）**。具象は `opus`/`raw`、raw 既定 |
 
-> 注意: 現状 backend に **TTS（音声合成）port が存在しない**（`backend-api.md` の port 一覧は ASR/Vision/
-> WakeWord/Agent/Settings/EventPublisher のみ）。下り Opus 音声を返すには TTS port + Opus enc の新設が要る。
-> Opus enc/dec は `infrastructure/` の具象に閉じ込め、WS ハンドラからは port 経由で扱う。
+> #7-b で **TTS（音声合成）port `SpeechSynthesizer` と 下り `AudioEncoder` port を新設**した。
+> 具象 TTS は Irodori-TTS（`infrastructure/tts/irodori_tts_synthesizer.py`、ADR-0006）で、heavy dep
+> （PyTorch / HF チェックポイント）は optional extra `[tts]` + 遅延ロード。既定 provider は `dummy`
+> （no-model 環境で `make check` が通る）。`emotion` は絵文字スタイルへマッピング
+> （`infrastructure/tts/emotion_style.py`）。Opus enc/dec・リサンプルは `infrastructure/audio` の具象に
+> 閉じ込め、WS ハンドラからは port 経由で扱う。未設定/未インストール時は**テキストのみ**にフォールバックし
+> 接続を壊さない（design-spec §13）。
 
 WS ハンドラ（DI で各 port を注入）の擬似フロー:
 ```
 on connect    → handshake(hello 交換), session 登録
 on listen.start → turn = UserSpeaking
 on 上りOpus  → opus_dec → asr.feed() → 部分結果を stt{text} で返す
-on listen.stop / VAD終了 → asr.final() → agent.chat() → llm{emotion}+tts{start} → tts合成→Opus enc→下り → tts{stop}
+on listen.stop / VAD終了 → asr.final() → agent.chat() → llm{emotion}+tts{start}+tts{sentence_start}
+                           → synth(text,emotion)→48k→24kリサンプル→Opus enc→下りバイナリフレーム列 → tts{stop}
+                           （synth/enc が未設定/失敗時はテキストのみへフォールバック, design-spec §13）
 on abort      → 進行中 TTS を停止（バージイン、§6）
 ```
 
@@ -307,8 +316,10 @@ listen mode 対応:
    （Anthropic Claude を使う場合は OpenAI 互換ではないため別 Adapter or 互換ゲートウェイの要否を判断）
 2. **ASR provider**: faster-whisper / sherpa-onnx 等のいずれか（`backend-api.md` §4.1 TODO issue#7）。
    ストリーミング対応・日本語精度・PC リソースで選定。
-3. **TTS provider と下り音声 port の新設**: 現状 backend に TTS port が無い（§4.3）。下り Opus 音声を返すには
-   TTS port + Opus enc を新設する必要がある。provider（クラウド/ローカル）と新設可否を判断。
+3. ~~**TTS provider と下り音声 port の新設**~~: **決定済み（ADR-0006 / #7-b）**。`SpeechSynthesizer` port +
+   下り `AudioEncoder` port を新設し、具象 TTS は Irodori-TTS（heavy dep は optional extra `[tts]` + 遅延ロード、
+   既定 provider は dummy）。emotion→絵文字スタイル制御、48k→24k リサンプル → Opus enc → バイナリフレーム送出。
+   残課題: 参照 wav / モデルチェックポイントの選定、実機でのレイテンシ・読み精度検証（§7 実機検証）。
 4. **スキーマ方針の最終承認**: §2.3 推奨 = **xiaozhi 踏襲（案 A）**。これで確定してよいか。
 5. **WS バイナリ version**: 2（timestamp 付き・server-side AEC 可）か 3（軽量）か（§3.1）。
 6. **device_id とパス/ヘッダの整合**: パスの `{device_id}` とヘッダ `Device-Id`(MAC) のどちらを正にするか（§5.1）。

@@ -13,17 +13,21 @@ from functools import lru_cache
 
 from app.application.ports.agent_gateway import AgentGateway
 from app.application.ports.audio_decoder import AudioDecoder
+from app.application.ports.audio_encoder import AudioEncoder
 from app.application.ports.bot_event_publisher import BotEventPublisher
 from app.application.ports.settings_repository import SettingsRepository
 from app.application.ports.speech_recognizer import SpeechRecognizer
+from app.application.ports.speech_synthesizer import SpeechSynthesizer
 from app.application.ports.vision_recognizer import VisionRecognizer
 from app.application.ports.wakeword_detector import WakeWordDetector
 from app.config.settings import AppSettings, get_settings
 from app.infrastructure.agent.registry import build_agent_gateway
+from app.infrastructure.audio.encoder_registry import build_audio_encoder
 from app.infrastructure.audio.registry import build_audio_decoder
 from app.infrastructure.persistence.sqlite_settings_repository import SqliteSettingsRepository
 from app.infrastructure.speech.registry import build_speech_recognizer
 from app.infrastructure.transport.in_memory_bot_event_publisher import InMemoryBotEventPublisher
+from app.infrastructure.tts.registry import build_speech_synthesizer
 from app.infrastructure.vision.dummy_vision_recognizer import DummyVisionRecognizer
 from app.infrastructure.wakeword.dummy_wakeword_detector import DummyWakeWordDetector
 
@@ -42,6 +46,11 @@ class Container:
         self._speech_recognizer: SpeechRecognizer = build_speech_recognizer(settings)
         # Uplink Opus decoder resolved via the audio registry (raw default).
         self._audio_decoder: AudioDecoder = build_audio_decoder(settings)
+        # Downlink TTS: synthesizer (dummy default; irodori in deployment,
+        # ADR-0006) + Opus encoder (raw default). Both registry-resolved, no
+        # if-branching; heavy deps stay lazy (#7-b).
+        self._speech_synthesizer: SpeechSynthesizer = build_speech_synthesizer(settings)
+        self._audio_encoder: AudioEncoder = build_audio_encoder(settings)
         self._vision_recognizer: VisionRecognizer = DummyVisionRecognizer()
         self._wakeword_detector: WakeWordDetector = DummyWakeWordDetector()
         self._event_publisher: BotEventPublisher = InMemoryBotEventPublisher()
@@ -65,6 +74,14 @@ class Container:
     @property
     def audio_decoder(self) -> AudioDecoder:
         return self._audio_decoder
+
+    @property
+    def speech_synthesizer(self) -> SpeechSynthesizer:
+        return self._speech_synthesizer
+
+    @property
+    def audio_encoder(self) -> AudioEncoder:
+        return self._audio_encoder
 
     @property
     def vision_recognizer(self) -> VisionRecognizer:

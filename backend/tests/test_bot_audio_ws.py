@@ -10,6 +10,10 @@ models, no network (CLAUDE.md). Verifies:
 - abort emits tts.stop and discards the in-progress turn,
 - a corrupt audio frame / failing ASR does not break the connection
   (design-spec §13).
+
+The downlink TTS audio frames (#7-b) are covered in test_bot_audio_tts.py; the
+flow tests here inject a silent (no-frame) synthesizer so the JSON stream stays
+identical to #7-a.
 """
 
 from __future__ import annotations
@@ -18,12 +22,30 @@ from collections.abc import Callable
 
 from app.application.ports.agent_gateway import AgentError, AgentGateway
 from app.application.ports.audio_decoder import AudioDecodeError, AudioDecoder
+from app.application.ports.audio_encoder import AudioEncoder
 from app.application.ports.speech_recognizer import SpeechRecognizer
+from app.application.ports.speech_synthesizer import SpeechSynthesizer
 from app.domain.agent.entities import AgentProfile
 from app.domain.agent.value_objects import AgentReply, ProactiveEvent
 from app.domain.speech.entities import SpeechRecognitionConfig
-from app.domain.speech.value_objects import AudioFormat, SpeechRecognitionResult
+from app.domain.speech.value_objects import (
+    AudioFormat,
+    SpeechRecognitionResult,
+    SynthesizedAudio,
+)
 from fastapi.testclient import TestClient
+
+
+class _SilentSynth(SpeechSynthesizer):
+    """Produces no PCM, so no downlink audio frames are sent (#7-a JSON only)."""
+
+    def synthesize(self, *, text: str, emotion: str = "neutral") -> SynthesizedAudio:
+        return SynthesizedAudio(pcm=b"", sample_rate=24000)
+
+
+class _PassThroughEncoder(AudioEncoder):
+    def encode(self, *, pcm: bytes, audio_format: AudioFormat) -> list[bytes]:
+        return [pcm] if pcm else []
 
 
 class _FakeAsr(SpeechRecognizer):
@@ -118,7 +140,12 @@ def test_listen_to_stt_llm_tts_stream(
     asr = _FakeAsr(text="げんき？")
     decoder = _FakeDecoder()
     agent = _FakeAgent(AgentReply(text="元気だよ", emotion="happy"))
-    client = audio_ws_client_factory(gateway=agent, speech_recognizer=asr, audio_decoder=decoder)
+    client = audio_ws_client_factory(
+        gateway=agent,
+        speech_recognizer=asr,
+        audio_decoder=decoder,
+        speech_synthesizer=_SilentSynth(),
+    )
     with _connect(client) as ws:
         ws.send_json(_HELLO)
         ws.receive_json()  # server hello
@@ -166,7 +193,7 @@ def test_listen_detect_starts_turn_from_text(
     audio_ws_client_factory: Callable[..., TestClient],
 ) -> None:
     agent = _FakeAgent(AgentReply(text="呼んだ？", emotion="curious"))
-    client = audio_ws_client_factory(gateway=agent)
+    client = audio_ws_client_factory(gateway=agent, speech_synthesizer=_SilentSynth())
     with _connect(client) as ws:
         ws.send_json(_HELLO)
         ws.receive_json()

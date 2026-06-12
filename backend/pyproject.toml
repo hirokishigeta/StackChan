@@ -31,6 +31,15 @@ opus = [
 sherpa = [
     "sherpa-onnx>=1.10",
 ]
+# Irodori-TTS downlink synthesis (ADR-0006). Heavy: PyTorch + a HF checkpoint
+# (separate download, paths via settings). Lazy-loaded; not needed for tests.
+# The Irodori-TTS package itself is installed from source/HF (not on PyPI), see
+# app/infrastructure/tts/irodori_tts_synthesizer.py; this extra pulls the heavy
+# runtime (torch). transformers is needed to load the HF checkpoint.
+tts = [
+    "torch>=2.2",
+    "transformers>=4.40",
+]
 
 [tool.uv]
 # dev dependencies are installed by `uv sync --extra dev` (see Makefile)
