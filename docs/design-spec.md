@@ -436,6 +436,8 @@ device 側イベント（注視検出等）から自発話しかけを生成す�
 - 上り: マイク音声チャンク（PCM。Bot 発話中も継続送信）
 - 下り: TTS 音声チャンク、制御イベント（`stop_speaking` 等）、部分認識結果、ターンイベント（`turn_state_changed` 等）
 
+下り TTS 音声は **Irodori-TTS**（ADR-0006 / #7-b）で合成し、出力 48kHz を既定 24kHz/60ms へリサンプル → Opus エンコードして `tts.start`〜`tts.stop` 間にバイナリフレームで送出する（emotion→絵文字スタイル制御、`SpeechSynthesizer`/`AudioEncoder` port は registry 解決、未設定/未インストール時はテキストのみにフォールバック）。
+
 ## 12. 実装ステップ
 
 | Phase | 内容 | 成果物 |

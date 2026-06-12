@@ -67,10 +67,32 @@ class AppSettings(BaseSettings):
     uplink_frame_duration_ms: int = 60
 
     # Downlink (server -> device) audio_params returned in the server hello.
-    # TTS audio itself is out of scope for #7-a (#7-b); these values are still
-    # negotiated now so firmware (#5) can rely on them.
+    # These values are negotiated so firmware (#5) can rely on them; the
+    # downlink TTS audio path (#7-b) resamples/encodes to these.
     downlink_sample_rate: int = 24000
+    downlink_channels: int = 1
     downlink_frame_duration_ms: int = 60
+
+    # Downlink audio encoder (PCM -> Opus), resolved via a registry. Default is
+    # "raw" (PCM pass-through, framed) so the WS server runs without libopus;
+    # set "opus" once the optional [opus] extra is installed
+    # (docs/backend-protocol.md §3). No if-branching (CLAUDE.md).
+    audio_encoder: str = "raw"
+
+    # TTS (downlink speech synthesis) provider, resolved via a registry. Default
+    # is "dummy" so the process / make check run without heavy deps or models;
+    # set "irodori" in deployment (ADR-0006). The WS loop falls back to a
+    # text-only turn if synthesis is unavailable (design-spec §13).
+    default_tts_provider: str = "dummy"
+
+    # Irodori-TTS (ADR-0006). Heavy deps (PyTorch / HF checkpoint) are optional
+    # and lazy-loaded; paths/device come from here (no hard-coded paths,
+    # CLAUDE.md). Empty by default: IrodoriTtsSynthesizer raises a clear error
+    # if used without these set. Irodori emits 48 kHz audio.
+    irodori_model_path: str = ""
+    irodori_reference_wav_path: str = ""
+    irodori_device: str = "cpu"
+    irodori_sample_rate: int = 48000
 
 
 @lru_cache

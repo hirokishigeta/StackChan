@@ -1,0 +1,255 @@
+"""Downlink TTS audio tests (Issue #7-b).
+
+Exercises the ``tts.start`` -> binary audio frames -> ``tts.stop`` downlink flow
+with fakes (fake SpeechSynthesizer / AudioEncoder / AgentGateway) — no heavy
+deps, no models, no native codec (CLAUDE.md). Verifies:
+
+- the full message stream (stt/llm/tts.start/sentence_start/<audio>/tts.stop),
+- emotion -> Irodori emoji style mapping,
+- TTS-disabled (failing synth) degrades to text-only without breaking the conn,
+- the resampler and frame splitting behave as expected.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+
+from app.application.ports.agent_gateway import AgentGateway
+from app.application.ports.audio_encoder import AudioEncodeError, AudioEncoder
+from app.application.ports.speech_recognizer import SpeechRecognizer
+from app.application.ports.speech_synthesizer import SpeechSynthesisError, SpeechSynthesizer
+from app.domain.agent.entities import AgentProfile
+from app.domain.agent.value_objects import AgentReply, ProactiveEvent
+from app.domain.speech.entities import SpeechRecognitionConfig
+from app.domain.speech.value_objects import AudioFormat, SpeechRecognitionResult, SynthesizedAudio
+from app.infrastructure.audio.raw_pcm_audio_encoder import RawPcmAudioEncoder
+from app.infrastructure.audio.resample import resample_pcm16
+from app.infrastructure.tts.dummy_speech_synthesizer import DummySpeechSynthesizer
+from app.infrastructure.tts.emotion_style import style_text
+from fastapi.testclient import TestClient
+
+
+class _FakeAgent(AgentGateway):
+    def __init__(self, reply: AgentReply) -> None:
+        self.reply = reply
+
+    async def chat(
+        self, *, message: str, profile: AgentProfile, context: dict[str, object] | None = None
+    ) -> AgentReply:
+        return self.reply
+
+    async def proactive(self, *, event: ProactiveEvent, profile: AgentProfile) -> AgentReply:
+        return self.reply
+
+
+class _FakeAsr(SpeechRecognizer):
+    async def recognize(
+        self, *, audio: bytes, config: SpeechRecognitionConfig
+    ) -> SpeechRecognitionResult:
+        return SpeechRecognitionResult(text="やあ", language=config.language, confidence=1.0)
+
+
+class _RecordingSynth(SpeechSynthesizer):
+    """Records (text, emotion) and returns a fixed PCM at 48 kHz (Irodori-like)."""
+
+    def __init__(self, *, sample_count: int = 4800, sample_rate: int = 48000) -> None:
+        self.calls: list[tuple[str, str]] = []
+        self._pcm = b"\x01\x02" * sample_count
+        self._sample_rate = sample_rate
+
+    def synthesize(self, *, text: str, emotion: str = "neutral") -> SynthesizedAudio:
+        self.calls.append((text, emotion))
+        return SynthesizedAudio(pcm=self._pcm, sample_rate=self._sample_rate)
+
+
+class _StyleRecordingSynth(SpeechSynthesizer):
+    """Applies the emoji style mapping so the wire text can be asserted."""
+
+    def __init__(self) -> None:
+        self.styled: list[str] = []
+
+    def synthesize(self, *, text: str, emotion: str = "neutral") -> SynthesizedAudio:
+        self.styled.append(style_text(text=text, emotion=emotion))
+        return SynthesizedAudio(pcm=b"\x00\x00" * 1440, sample_rate=24000)
+
+
+class _FailingSynth(SpeechSynthesizer):
+    def synthesize(self, *, text: str, emotion: str = "neutral") -> SynthesizedAudio:
+        raise SpeechSynthesisError("no model")
+
+
+class _FailingEncoder(AudioEncoder):
+    def encode(self, *, pcm: bytes, audio_format: AudioFormat) -> list[bytes]:
+        raise AudioEncodeError("no codec")
+
+
+_HELLO = {
+    "type": "hello",
+    "version": 0,
+    "transport": "websocket",
+    "audio_params": {"format": "opus", "sample_rate": 16000, "channels": 1, "frame_duration": 60},
+}
+
+
+def _connect(client: TestClient):  # type: ignore[no-untyped-def]
+    return client.websocket_connect("/api/bot/cores3-001/audio")
+
+
+def _drain_to_stop(ws):  # type: ignore[no-untyped-def]
+    """Receive messages after sentence_start until tts.stop, collecting frames."""
+    audio_frames: list[bytes] = []
+    while True:
+        message = ws.receive()
+        if message.get("bytes") is not None:
+            audio_frames.append(message["bytes"])
+            continue
+        import json
+
+        data = json.loads(message["text"])
+        if data == {"type": "tts", "state": "stop"}:
+            return audio_frames
+
+
+def test_tts_audio_frames_between_start_and_stop(
+    audio_ws_client_factory: Callable[..., TestClient],
+) -> None:
+    synth = _RecordingSynth(sample_count=4800, sample_rate=48000)  # 0.1 s @ 48k
+    client = audio_ws_client_factory(
+        gateway=_FakeAgent(AgentReply(text="げんき", emotion="happy")),
+        speech_synthesizer=synth,
+        audio_encoder=RawPcmAudioEncoder(),
+    )
+    with _connect(client) as ws:
+        ws.send_json(_HELLO)
+        ws.receive_json()  # server hello
+        ws.send_json({"type": "listen", "state": "detect", "text": "ねえ"})
+        assert ws.receive_json() == {"type": "stt", "text": "ねえ"}
+        assert ws.receive_json() == {"type": "llm", "emotion": "happy"}
+        assert ws.receive_json() == {"type": "tts", "state": "start"}
+        assert ws.receive_json() == {"type": "tts", "state": "sentence_start", "text": "げんき"}
+        frames = _drain_to_stop(ws)
+
+    assert synth.calls == [("げんき", "happy")]
+    # 0.1 s @ 48k -> 24k = 2400 samples = 4800 bytes; 60 ms frame @ 24k = 2880
+    # bytes -> 2 frames (2880 + 1920).
+    assert len(frames) == 2
+    assert sum(len(f) for f in frames) == 4800
+
+
+def test_emotion_maps_to_irodori_emoji_style(
+    audio_ws_client_factory: Callable[..., TestClient],
+) -> None:
+    synth = _StyleRecordingSynth()
+    client = audio_ws_client_factory(
+        gateway=_FakeAgent(AgentReply(text="おはよう", emotion="sleepy")),
+        speech_synthesizer=synth,
+        audio_encoder=RawPcmAudioEncoder(),
+    )
+    with _connect(client) as ws:
+        ws.send_json(_HELLO)
+        ws.receive_json()
+        ws.send_json({"type": "listen", "state": "detect", "text": "ねえ"})
+        ws.receive_json()  # stt
+        ws.receive_json()  # llm
+        ws.receive_json()  # tts.start
+        ws.receive_json()  # sentence_start
+        _drain_to_stop(ws)
+    assert synth.styled == ["おはよう😴"]
+
+
+def test_full_emotion_emoji_table() -> None:
+    assert style_text(text="x", emotion="neutral") == "x"
+    assert style_text(text="x", emotion="happy") == "x😊"
+    assert style_text(text="x", emotion="sad") == "x😢"
+    assert style_text(text="x", emotion="angry") == "x😠"
+    assert style_text(text="x", emotion="curious") == "x🤔"
+    assert style_text(text="x", emotion="surprised") == "x😲"
+    assert style_text(text="x", emotion="sleepy") == "x😴"
+    # Unknown emotion falls back to no emoji (plain text).
+    assert style_text(text="x", emotion="bogus") == "x"
+
+
+def test_synth_failure_falls_back_to_text_only(
+    audio_ws_client_factory: Callable[..., TestClient],
+) -> None:
+    client = audio_ws_client_factory(
+        gateway=_FakeAgent(AgentReply(text="よろしく", emotion="happy")),
+        speech_synthesizer=_FailingSynth(),
+        audio_encoder=RawPcmAudioEncoder(),
+    )
+    with _connect(client) as ws:
+        ws.send_json(_HELLO)
+        ws.receive_json()
+        ws.send_json({"type": "listen", "state": "detect", "text": "ねえ"})
+        ws.receive_json()  # stt
+        ws.receive_json()  # llm
+        ws.receive_json()  # tts.start
+        sentence = ws.receive_json()
+        stop = ws.receive_json()  # no audio frames -> stop comes right after
+    assert sentence == {"type": "tts", "state": "sentence_start", "text": "よろしく"}
+    assert stop == {"type": "tts", "state": "stop"}
+
+
+def test_encoder_failure_falls_back_to_text_only(
+    audio_ws_client_factory: Callable[..., TestClient],
+) -> None:
+    client = audio_ws_client_factory(
+        gateway=_FakeAgent(AgentReply(text="またね", emotion="sad")),
+        speech_synthesizer=_RecordingSynth(),
+        audio_encoder=_FailingEncoder(),
+    )
+    with _connect(client) as ws:
+        ws.send_json(_HELLO)
+        ws.receive_json()
+        ws.send_json({"type": "listen", "state": "detect", "text": "ねえ"})
+        ws.receive_json()  # stt
+        ws.receive_json()  # llm
+        ws.receive_json()  # tts.start
+        ws.receive_json()  # sentence_start
+        stop = ws.receive_json()
+        # Connection still usable after the fallback.
+        ws.send_json({"type": "listen", "state": "detect", "text": "もう一度"})
+        again = ws.receive_json()
+    assert stop == {"type": "tts", "state": "stop"}
+    assert again == {"type": "stt", "text": "もう一度"}
+
+
+def test_default_dummy_synth_produces_frames(
+    audio_ws_client_factory: Callable[..., TestClient],
+) -> None:
+    # No synthesizer/encoder injected -> registry defaults (dummy synth + raw
+    # encoder) wire up and produce real downlink frames without heavy deps.
+    client = audio_ws_client_factory(
+        gateway=_FakeAgent(AgentReply(text="やっほー", emotion="happy")),
+    )
+    with _connect(client) as ws:
+        ws.send_json(_HELLO)
+        ws.receive_json()
+        ws.send_json({"type": "listen", "state": "detect", "text": "ねえ"})
+        ws.receive_json()  # stt
+        ws.receive_json()  # llm
+        ws.receive_json()  # tts.start
+        ws.receive_json()  # sentence_start
+        frames = _drain_to_stop(ws)
+    assert frames  # at least one downlink audio frame
+
+
+def test_resample_48k_to_24k_halves_sample_count() -> None:
+    pcm = b"\x01\x02" * 480  # 480 samples @ 48k
+    out = resample_pcm16(pcm=pcm, src_rate=48000, dst_rate=24000)
+    assert len(out) // 2 == 240
+
+
+def test_resample_noop_when_rates_match() -> None:
+    pcm = b"\x01\x02" * 100
+    assert resample_pcm16(pcm=pcm, src_rate=24000, dst_rate=24000) == pcm
+
+
+def test_dummy_synth_scales_with_text() -> None:
+    from app.config.settings import AppSettings
+
+    synth = DummySpeechSynthesizer(AppSettings())
+    short = synth.synthesize(text="あ")
+    long = synth.synthesize(text="あ" * 50)
+    assert short.sample_rate == 24000
+    assert len(long.pcm) > len(short.pcm)

@@ -15,6 +15,19 @@ class SpeechRecognitionResult:
 
 
 @dataclass(frozen=True)
+class SynthesizedAudio:
+    """One synthesized utterance as little-endian PCM16 mono (design-spec §11.8).
+
+    ``sample_rate`` is the rate the TTS engine actually produced (Irodori emits
+    48 kHz, ADR-0006); the downlink encoder resamples this to the negotiated
+    downlink rate (default 24 kHz) before Opus encoding.
+    """
+
+    pcm: bytes
+    sample_rate: int
+
+
+@dataclass(frozen=True)
 class AudioFormat:
     """Negotiated audio frame parameters (docs/backend-protocol.md §3).
 
