@@ -9,6 +9,50 @@ config STACKCHAN_SERVER_URL
         /stackChan/apps and /stackChan/ws from this base. Override in your
         sdkconfig.defaults.local to point at a self-hosted deployment.
 
+config STACKCHAN_BACKEND_OTA_URL
+    string "Backend OTA/provisioning URL (replaces api.tenclass.net)"
+    default ""
+    help
+        URL the xiaozhi Application queries at boot (Ota::CheckVersion) to obtain
+        the WebSocket connection config. When non-empty, it is written to NVS
+        wifi.ota_url before the Application starts, replacing the cloud default
+        (api.tenclass.net). The PC backend (Issue #7) must answer this endpoint
+        with a JSON body containing a "websocket" section
+        ({"websocket": {"url": "...", "token": "...", "version": 2}}) and NO
+        "activation" section, which both disables cloud activation and makes the
+        Application select WebsocketProtocol. Leave empty to keep the existing
+        NVS / cloud behavior unchanged.
+
+config STACKCHAN_BACKEND_WS_URL
+    string "Backend WebSocket URL (NVS websocket.url default)"
+    default ""
+    help
+        Optional build-time default for NVS websocket.url, e.g.
+        ws://<PC-host>:<port>/api/bot/{device_id}/audio (docs/backend-protocol.md
+        §5.1). Seeded into NVS only when websocket.url is currently empty, so a
+        value provisioned at runtime (Setup/BLE, TODO(issue#5-follow)) is never
+        overwritten. NOTE: pre-seeding the URL alone does NOT make the Application
+        select WebsocketProtocol; that selection still requires the OTA response
+        above to carry a "websocket" section. This default is the connection
+        target used once WebsocketProtocol is active.
+
+config STACKCHAN_BACKEND_WS_TOKEN
+    string "Backend WebSocket token (NVS websocket.token default)"
+    default ""
+    help
+        Optional build-time default for NVS websocket.token (Pairing Token, sent
+        as Authorization: Bearer <token>). Empty means no Authorization header.
+        Seeded only when websocket.token is currently empty.
+
+config STACKCHAN_BACKEND_WS_VERSION
+    int "Backend WebSocket binary protocol version (NVS websocket.version default)"
+    default 2
+    range 0 3
+    help
+        Binary frame version negotiated in the hello message (2 = timestamped,
+        server-side AEC capable; 3 = lightweight; 0 = raw Opus). Seeded into NVS
+        websocket.version only when it is currently 0/unset.
+
 endmenu
 
 menu "Xiaozhi Assistant"

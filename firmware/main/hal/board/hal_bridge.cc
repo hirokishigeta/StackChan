@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 #include "hal_bridge.h"
+#include "backend_config.h"
 #include "stackchan_display.h"
 #include <esp_log.h>
 #include <esp_err.h>
@@ -112,6 +113,10 @@ void xiaozhi_board_init()
 void start_xiaozhi_app()
 {
     set_xiaozhi_mode(true);
+
+    // Provision PC-backend connection (NVS) and disable cloud activation before
+    // the Application reads its OTA / websocket config (Issue #5, ADR-0004).
+    provision_backend_connection();
 
     // Initialize and run the application
     auto& app = Application::GetInstance();
