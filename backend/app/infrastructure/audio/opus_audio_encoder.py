@@ -31,6 +31,19 @@ class OpusAudioEncoder(AudioEncoder):
         self._encoder_cls: Callable[..., Any] | None = None
         self._application: Any | None = None
 
+    def for_session(self) -> OpusAudioEncoder:
+        """Return a fresh encoder so each WS session owns its libopus state.
+
+        libopus encoders are stateful per stream; the container-held instance
+        must not be shared across concurrent connections (Issue #27). The
+        resolved binding class is carried over so the new instance does not
+        re-import opuslib.
+        """
+        fresh = OpusAudioEncoder()
+        fresh._encoder_cls = self._encoder_cls
+        fresh._application = self._application
+        return fresh
+
     def _resolve_encoder_cls(self) -> tuple[Callable[..., Any], Any]:
         if self._encoder_cls is not None:
             return self._encoder_cls, self._application

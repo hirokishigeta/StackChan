@@ -286,13 +286,16 @@ class BotAudioHandler:
 async def bot_audio(websocket: WebSocket, device_id: str) -> None:
     """xiaozhi-compatible audio channel (docs/backend-protocol.md §4.1)."""
     container = container_module.get_container()
+    # Opus enc/dec are stateful per stream; give this connection its own
+    # session-scoped instances so concurrent devices never share libopus state
+    # (Issue #27). Stateless codecs (raw) return the shared instance unchanged.
     handler = BotAudioHandler(
         settings=container.settings,
         speech_recognizer=container.speech_recognizer,
         agent_gateway=container.agent_gateway,
-        audio_decoder=container.audio_decoder,
+        audio_decoder=container.audio_decoder.for_session(),
         speech_synthesizer=container.speech_synthesizer,
-        audio_encoder=container.audio_encoder,
+        audio_encoder=container.audio_encoder.for_session(),
         repository=container.repository,
     )
     await handler.run(websocket, device_id)
