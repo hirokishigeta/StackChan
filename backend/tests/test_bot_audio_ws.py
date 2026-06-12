@@ -228,6 +228,31 @@ def test_abort_emits_tts_stop_and_discards_turn(
     assert asr.received == []  # the aborted turn never reached ASR
 
 
+def test_detect_after_abort_emits_full_response_stream(
+    audio_ws_client_factory: Callable[..., TestClient],
+) -> None:
+    """A wake-word detect after an abort must run a complete new turn.
+
+    Regression: detect did not clear ``session.aborted``, so the turn emitted
+    ``stt`` then hit the abort guard in _run_agent_turn and silently dropped
+    ``llm``/``tts``, leaving the device waiting for a response that never came.
+    """
+    agent = _FakeAgent(AgentReply(text="やあ", emotion="happy"))
+    client = audio_ws_client_factory(gateway=agent, speech_synthesizer=_SilentSynth())
+    with _connect(client) as ws:
+        ws.send_json(_HELLO)
+        ws.receive_json()
+        ws.send_json({"type": "listen", "state": "start"})
+        ws.send_json({"type": "abort"})
+        assert ws.receive_json() == {"type": "tts", "state": "stop"}
+        ws.send_json({"type": "listen", "state": "detect", "text": "ねえ"})
+        assert ws.receive_json() == {"type": "stt", "text": "ねえ"}
+        assert ws.receive_json() == {"type": "llm", "emotion": "happy"}
+        assert ws.receive_json() == {"type": "tts", "state": "start"}
+        assert ws.receive_json() == {"type": "tts", "state": "sentence_start", "text": "やあ"}
+        assert ws.receive_json() == {"type": "tts", "state": "stop"}
+
+
 def test_corrupt_frame_keeps_connection_alive(
     audio_ws_client_factory: Callable[..., TestClient],
 ) -> None:
