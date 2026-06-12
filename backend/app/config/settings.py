@@ -27,6 +27,29 @@ class AppSettings(BaseSettings):
     # CORS: LAN-only by default (design-spec §13 security).
     cors_allow_origins: list[str] = ["*"]
 
+    # OTA check / provisioning endpoint (Issue #23, docs/backend-protocol.md §5.3).
+    # The firmware's Ota::CheckVersion POSTs to wifi.ota_url (pointed here by #5);
+    # the backend answers with a xiaozhi-compatible `websocket` section so the
+    # device picks WebsocketProtocol in Application::InitializeProtocol. These
+    # values build the WS URL returned to the device and are never hard-coded in
+    # the route (CLAUDE.md).
+    #
+    # ws_public_scheme/host/port build:
+    #   <scheme>://<host>:<port><ws_path_prefix>/<device_id>/audio
+    # host defaults to a placeholder that MUST be overridden in deployment with
+    # the backend's LAN-reachable address (a device cannot reach "localhost").
+    ota_ws_scheme: str = "ws"
+    ota_ws_host: str = "127.0.0.1"
+    ota_ws_port: int = 8000
+    # Path prefix of the audio WS endpoint (matches bot_audio_ws router prefix).
+    ota_ws_path_prefix: str = "/api/bot"
+    # Protocol-Version advertised to the device (websocket.version). 2 keeps the
+    # binary frame timestamp field for server-side AEC (backend-protocol.md §3.1).
+    ota_ws_version: int = 2
+    # Optional bearer token written to the device's websocket.token. Empty means
+    # no Authorization header on the audio WS (websocket_protocol.cc:101-107).
+    ota_ws_token: str = ""
+
     # Agent provider selection (resolved via a registry in di_container; the
     # value must match an AgentType, e.g. "OpenAICompatible"). No if-based
     # provider branching (CLAUDE.md / design-spec §13).

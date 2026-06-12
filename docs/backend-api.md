@@ -33,6 +33,7 @@ PC バックエンド（`backend/`、FastAPI）が LAN 内で提供する API �
 
 | メソッド | パス | tags | 実動 / ダミー | 概要 |
 |---|---|---|---|---|
+| POST | `/api/ota/check` | ota | 実動 | OTA チェック / プロビジョニング（xiaozhi 互換 `websocket` 応答。WS 接続成立の前提） |
 | POST | `/api/bot/register` | bot | 実動 | Bot 登録・設定返却 |
 | GET | `/api/bot/{device_id}/commands` | bot | 実動（ポーリング） | 制御コマンドの取得＋キュー消去 |
 | GET | `/api/bot/{device_id}/wakeword` | bot | 実動（設定）/ 検知はダミー | 有効 Wake Word 設定の取得 |
@@ -47,6 +48,37 @@ PC バックエンド（`backend/`、FastAPI）が LAN 内で提供する API �
 | GET | `/health` | health | 実動 | ヘルスチェック |
 
 「実動 / ダミー」の根拠は §6（実動/ダミーの内訳）を参照。
+
+---
+
+## 1b. OTA ルート（`backend/app/interfaces/api/ota_routes.py`、Issue #23 / ADR-0007）
+
+### 1b.1 `POST /api/ota/check`
+
+firmware の `Ota::CheckVersion`（`firmware/xiaozhi-esp32/main/ota.cc`）が `wifi.ota_url`
+（#5 で backend に向く）へ投げる OTA チェック。backend は xiaozhi 互換の `websocket` セクションを
+返し、firmware に WebSocket を選ばせる（`Application::InitializeProtocol`）。WS 接続成立の前提。
+契約の詳細は `docs/backend-protocol.md` §5.3 を正とする。
+
+Request（firmware が送る。`Content-Type: application/json`）:
+
+- ヘッダ: `Device-Id`(MAC, device 識別の正) / `Client-Id`(UUID) / `User-Agent` / `Activation-Version`
+- ボディ: `Board::GetSystemInfoJson`（`version`, `application.{name,version}` 等）
+
+Response 200:
+
+```jsonc
+{
+  "websocket": { "url": "ws://<host>:<port>/api/bot/<device_id>/audio", "token": "", "version": 2 },
+  "firmware":  { "version": "1.4.2" }   // device の現バージョンをエコー。url は付けない
+}
+```
+
+- `websocket` のキーは `url` / `token` / `version` のみ。`url` は `Device-Id` + config（`ota_ws_*`）で構成。
+- **`activation` / `mqtt` は返さない**（クラウド activation スキップ、WebSocket 優先のため）。
+- 未登録 device は本応答時に登録（OTA チェックが初回接触のため）。`Device-Id` 欠落時も 500 にせず応答。
+
+ステータス: 200
 
 ---
 
@@ -375,6 +407,12 @@ URL・モデル名・閾値などはこのモジュールに集約（CLAUDE.md: 
 | `STACKCHAN_AGENT_REQUEST_TIMEOUT_S` | `30.0` | Agent リクエストのタイムアウト秒 |
 | `STACKCHAN_DEFAULT_SPEECH_PROVIDER` | `"dummy"` | （現状ダミー） |
 | `STACKCHAN_DEFAULT_SPEECH_LANGUAGE` | `"ja"` | 音声言語 |
+| `STACKCHAN_OTA_WS_SCHEME` | `"ws"` | OTA 応答の WS URL スキーム（#23） |
+| `STACKCHAN_OTA_WS_HOST` | `"127.0.0.1"` | OTA 応答の WS URL ホスト。**要デプロイ上書き**（device 到達可能 LAN アドレス） |
+| `STACKCHAN_OTA_WS_PORT` | `8000` | OTA 応答の WS URL ポート |
+| `STACKCHAN_OTA_WS_PATH_PREFIX` | `"/api/bot"` | 音声 WS パス接頭辞 |
+| `STACKCHAN_OTA_WS_VERSION` | `2` | `websocket.version`（Protocol-Version） |
+| `STACKCHAN_OTA_WS_TOKEN` | `""` | `websocket.token`（空なら Authorization 無し） |
 
 > 注意: `default_agent_model` の既定が `"dummy-model"` のため、OpenAICompatible を実運用するには
 > `STACKCHAN_DEFAULT_AGENT_MODEL` の上書きが事実上必須（device 設定の `agent.model_name` でも上書き可。

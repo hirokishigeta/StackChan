@@ -14,6 +14,7 @@ from app.interfaces.api import (
     agent_routes,
     bot_audio_ws,
     bot_routes,
+    ota_routes,
     settings_routes,
     speech_routes,
     vision_routes,
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
 
     app.include_router(bot_routes.router)
     app.include_router(bot_audio_ws.router)
+    app.include_router(ota_routes.router)
     app.include_router(agent_routes.router)
     app.include_router(speech_routes.router)
     app.include_router(vision_routes.router)
