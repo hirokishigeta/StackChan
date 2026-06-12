@@ -30,6 +30,8 @@ opus = [
 # sherpa-onnx ASR. Models are a separate download (paths via settings).
 sherpa = [
     "sherpa-onnx>=1.10",
+    # onnxruntime を同梱する公式 k2-fsa wheel (find-links 経由)。PyPI 版は dylib 欠落。
+    "sherpa-onnx-core",
 ]
 # OpenCV face detection (Issue #8). Not required for `make check`: the
 # recognizer is lazy-loaded and tests use a fake. numpy is pulled in by opencv.
@@ -48,7 +50,11 @@ tts = [
 ]
 
 [tool.uv]
-# dev dependencies are installed by `uv sync --extra dev` (see Makefile)
+# dev dependencies are installed by `uv sync --extra dev` (see Makefile).
+# macOS(arm64) では PyPI の sherpa-onnx wheel が libonnxruntime を同梱せず import に
+# 失敗するため、onnxruntime 同梱の公式 k2-fsa wheel index を追加する(--extra sherpa 用)。
+# dev/CI は sherpa を入れないので影響なし。
+find-links = ["https://k2-fsa.github.io/sherpa/onnx/cpu.html"]
 
 [build-system]
 requires = ["hatchling"]
