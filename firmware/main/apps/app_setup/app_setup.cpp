@@ -104,15 +104,6 @@ void AppSetup::onOpen()
               }}},
         },
         {
-            "Account",
-            {{"Unbind & Reset",
-              [&]() {
-                  _destroy_menu    = true;
-                  _need_warm_reset = true;
-                  _worker          = std::make_unique<AccountWorker>();
-              }}},
-        },
-        {
             "Firmware",
             {
                 {fmt::format("Version:  {}", common::FirmwareVersion),
