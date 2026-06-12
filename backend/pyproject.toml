@@ -31,6 +31,12 @@ opus = [
 sherpa = [
     "sherpa-onnx>=1.10",
 ]
+# OpenCV face detection (Issue #8). Not required for `make check`: the
+# recognizer is lazy-loaded and tests use a fake. numpy is pulled in by opencv.
+vision = [
+    "opencv-python>=4.9",
+    "numpy>=1.26",
+]
 # Irodori-TTS downlink synthesis (ADR-0006). Heavy: PyTorch + a HF checkpoint
 # (separate download, paths via settings). Lazy-loaded; not needed for tests.
 # The Irodori-TTS package itself is installed from source/HF (not on PyPI), see

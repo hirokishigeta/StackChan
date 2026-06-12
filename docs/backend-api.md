@@ -39,7 +39,8 @@ PC バックエンド（`backend/`、FastAPI）が LAN 内で提供する API �
 | POST | `/api/agent/chat` | agent | OpenAICompatible のみ実動 / 他はダミー | エージェント 1 ターン |
 | POST | `/api/agent/proactive` | agent | OpenAICompatible のみ実動 / 他はダミー | 自発話しかけ生成 |
 | POST | `/api/speech/recognize` | speech | ダミー（TODO issue#7） | 音声認識 |
-| POST | `/api/vision/detect` | vision | ダミー（TODO issue#6/#8） | 画像認識 |
+| POST | `/api/vision/detect` | vision | registry（dummy 既定 / OpenCV は extra） | 画像認識 |
+| POST | `/api/vision/attention` | vision | 実動（注視判定→自発話しかけ） | 注視判定・自発話しかけ（§6） |
 | GET | `/api/settings/{device_id}` | settings | 実動 | 設定集約の取得 |
 | PUT | `/api/settings/{device_id}` | settings | 実動 | 設定集約の部分更新（マージ） |
 | GET | `/` , `/dashboard` | dashboard | 実動（最小） | Bot 一覧 HTML |
@@ -231,10 +232,49 @@ Response 200: `AgentChatResponse`（chat と同一スキーマ）。
 }
 ```
 
-- ダミー実装（`DummyVisionRecognizer`）は常に上記の固定 face 検出を返す。
-- TODO(issue#6/#8): OpenCV / ONNX による顔・動体検出と注視推定。
+- Provider は registry 解決（`STACKCHAN_DEFAULT_VISION_PROVIDER`）。既定は `dummy`
+  （固定 face を返す。OpenCV / モデル不要で `make check` が通る）。`opencv` を指定すると
+  `OpenCvFaceDetector`（Haar カスケード）を使用する。OpenCV は optional extra
+  `[vision]`（`pip install 'stackchan-backend[vision]'`）で、import 時には読み込まず
+  初回 `detect` で遅延ロードする（未インストール時は `OpenCvVisionError`）。
+  カスケードのパスは `STACKCHAN_OPENCV_FACE_CASCADE_PATH`（空なら OpenCV 同梱の正面顔
+  カスケード）。
+- TODO(issue#6): DNN/ONNX 検出器・顔ランドマーク / 頭部姿勢 / 視線推定（design-spec §6.2 発展実装）。
 
-ファイル: `vision_routes.py` / `infrastructure/vision/dummy_vision_recognizer.py`
+ファイル: `vision_routes.py` / `infrastructure/vision/{dummy_vision_recognizer,opencv_face_detector,registry}.py`
+
+### 4.3 `POST /api/vision/attention`（design-spec §6）— 注視判定・自発話しかけ
+
+- リクエストボディ = 生バイト（1 フレーム。device 側の適応的送信は TODO(issue#5)）。
+- クエリ `device_id`（必須）、`conversation_active`（任意, 既定 false）。
+- 処理: 顔検出 → 注視判定（顔が画面中央付近 ∧ サイズ一定以上 ∧ 信頼度一定以上 ∧
+  `attention_duration_ms` 継続）→ 成立かつ自発話しかけ条件（有効 / クールダウン /
+  1日あたり最大回数 / 会話中でない）を満たせば `AgentGateway.proactive()` を呼び、
+  `look_at` + `set_expression` + `proactive_speak` コマンドを §11.5 のキューに積む
+  （device は `GET /api/bot/{device_id}/commands` で取得）。
+- Response 200（`VisionAttentionResponse`）:
+
+```jsonc
+{
+  "detections": [ /* §11.4 と同形 */ ],
+  "tracking_target": { "x": 160, "y": 120 },
+  "state": "AttentionDetected",          // VisionState（Idle/FaceDetected/AttentionDetected/Conversation 等）
+  "attention_detected": true,
+  "proactive_decision": "allowed",       // allowed/cooldown/max_per_day/in_conversation/disabled。未検出時は null
+  "proactive_text": "なにか手伝おうか？"  // 発火時のみ。それ以外は null
+}
+```
+
+- 「目が合ったら即連発」防止のため、クールダウン（既定 300s）・1日あたり最大回数
+  （既定 3）・会話中抑制を必ず評価する（design-spec §6.3 / §6.4）。現在時刻はユース
+  ケースに注入可能（テスト容易性）。Agent 失敗時はコマンドを積まずクールダウンも消費
+  しない（再試行可能・design-spec §13）。
+- 視線推定（頭部姿勢 / ランドマーク）と `disabled_in_focus_mode` / `disabled_at_night`
+  の実信号評価は TODO(issue#8/#6)。
+- 注視判定の閾値・継続時間は `AttentionDetectionConfig` / `ProactiveTalkConfig`（§5.3）。
+
+ファイル: `vision_routes.py` / `application/use_cases/detect_attention.py` /
+`domain/vision/{services,proactive}.py`
 
 ---
 

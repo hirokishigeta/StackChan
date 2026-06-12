@@ -79,6 +79,18 @@ class AppSettings(BaseSettings):
     # (docs/backend-protocol.md §3). No if-branching (CLAUDE.md).
     audio_encoder: str = "raw"
 
+    # Vision recognizer provider, resolved via a registry in di_container.
+    # Default is "dummy" so the process / make check run without OpenCV or any
+    # model; set "opencv" once the optional [vision] extra is installed
+    # (CLAUDE.md: registry, not if-branching).
+    default_vision_provider: str = "dummy"
+    # OpenCV Haar cascade path (no hard-coded paths; CLAUDE.md). Empty means use
+    # OpenCV's bundled frontal-face cascade. OpenCvFaceDetector raises a clear
+    # error if the cascade cannot be loaded (lazy, never at import time).
+    opencv_face_cascade_path: str = ""
+    opencv_scale_factor: float = 1.1
+    opencv_min_neighbors: int = 5
+
     # TTS (downlink speech synthesis) provider, resolved via a registry. Default
     # is "dummy" so the process / make check run without heavy deps or models;
     # set "irodori" in deployment (ADR-0006). The WS loop falls back to a
