@@ -157,8 +157,13 @@ class BotAudioHandler:
         elif state == "detect":
             # Wake-word detect carries text; treat it as the utterance so a
             # turn can start without uplink audio (docs/backend-protocol.md §2.1).
+            # detect begins a *new* turn, so clear any prior abort flag — else a
+            # turn that follows an abort emits `stt` then silently drops the
+            # `llm`/`tts` response (the abort guard in _run_agent_turn fires),
+            # leaving the device waiting forever.
             text = str(msg.get("text", ""))
             if text:
+                session.aborted = False
                 await self._run_agent_turn(ws, session, text)
 
     async def _handle_abort(self, ws: WebSocket, session: _Session, msg: dict[str, Any]) -> None:
