@@ -7,6 +7,7 @@ presentation layer never constructs concretes directly.
 from __future__ import annotations
 
 from app.application.ports.settings_repository import SettingsRepository
+from app.application.use_cases.detect_attention import DetectAttentionUseCase
 from app.application.use_cases.manage_settings import ManageSettingsUseCase
 from app.application.use_cases.process_agent_request import ProcessAgentRequestUseCase
 from app.application.use_cases.process_voice_input import ProcessVoiceInputUseCase
@@ -38,6 +39,17 @@ def get_voice_use_case() -> ProcessVoiceInputUseCase:
 def get_vision_use_case() -> RunVisionDetectionUseCase:
     container = get_container()
     return RunVisionDetectionUseCase(container.vision_recognizer, container.repository)
+
+
+def get_attention_use_case() -> DetectAttentionUseCase:
+    container = get_container()
+    return DetectAttentionUseCase(
+        container.vision_recognizer,
+        container.repository,
+        container.agent_gateway,
+        container.event_publisher,
+        sessions=container.vision_sessions,
+    )
 
 
 def get_settings_use_case() -> ManageSettingsUseCase:

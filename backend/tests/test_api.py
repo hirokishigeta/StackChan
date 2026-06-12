@@ -61,6 +61,20 @@ def test_vision_detect_dummy(client: TestClient) -> None:
     assert body["tracking_target"] is not None
 
 
+def test_vision_attention_route(dummy_agent_client: TestClient) -> None:
+    # Attention is disabled by default, so the route stays a safe no-op but must
+    # respond 200 with the evaluation envelope (design-spec §6).
+    _register(dummy_agent_client)
+    resp = dummy_agent_client.post(
+        "/api/vision/attention?device_id=cores3-001", content=b"\xff\xd8\xff"
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["state"] in {"Idle", "FaceDetected", "AttentionDetected"}
+    assert body["attention_detected"] is False
+    assert "detections" in body
+
+
 def test_commands_polling_drains_empty(client: TestClient) -> None:
     _register(client)
     resp = client.get("/api/bot/cores3-001/commands")

@@ -20,6 +20,7 @@ from app.application.ports.speech_recognizer import SpeechRecognizer
 from app.application.ports.speech_synthesizer import SpeechSynthesizer
 from app.application.ports.vision_recognizer import VisionRecognizer
 from app.application.ports.wakeword_detector import WakeWordDetector
+from app.application.use_cases.detect_attention import SessionStore
 from app.config.settings import AppSettings, get_settings
 from app.infrastructure.agent.registry import build_agent_gateway
 from app.infrastructure.audio.encoder_registry import build_audio_encoder
@@ -28,7 +29,7 @@ from app.infrastructure.persistence.sqlite_settings_repository import SqliteSett
 from app.infrastructure.speech.registry import build_speech_recognizer
 from app.infrastructure.transport.in_memory_bot_event_publisher import InMemoryBotEventPublisher
 from app.infrastructure.tts.registry import build_speech_synthesizer
-from app.infrastructure.vision.dummy_vision_recognizer import DummyVisionRecognizer
+from app.infrastructure.vision.registry import build_vision_recognizer
 from app.infrastructure.wakeword.dummy_wakeword_detector import DummyWakeWordDetector
 
 
@@ -51,9 +52,15 @@ class Container:
         # if-branching; heavy deps stay lazy (#7-b).
         self._speech_synthesizer: SpeechSynthesizer = build_speech_synthesizer(settings)
         self._audio_encoder: AudioEncoder = build_audio_encoder(settings)
-        self._vision_recognizer: VisionRecognizer = DummyVisionRecognizer()
+        # Provider resolved via the vision registry (dummy default; opencv in
+        # deployment with the optional [vision] extra). No if-branching. The
+        # OpenCV adapter loads cv2 / the cascade lazily (#8).
+        self._vision_recognizer: VisionRecognizer = build_vision_recognizer(settings)
         self._wakeword_detector: WakeWordDetector = DummyWakeWordDetector()
         self._event_publisher: BotEventPublisher = InMemoryBotEventPublisher()
+        # Per-device vision/attention runtime state (VisionState, attention
+        # continuity, proactive-talk cooldown / daily cap). In-memory this phase.
+        self._vision_sessions: SessionStore = SessionStore()
 
     @property
     def settings(self) -> AppSettings:
@@ -86,6 +93,10 @@ class Container:
     @property
     def vision_recognizer(self) -> VisionRecognizer:
         return self._vision_recognizer
+
+    @property
+    def vision_sessions(self) -> SessionStore:
+        return self._vision_sessions
 
     @property
     def wakeword_detector(self) -> WakeWordDetector:

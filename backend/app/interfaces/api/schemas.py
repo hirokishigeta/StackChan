@@ -91,6 +91,27 @@ class VisionDetectResponse(BaseModel):
     tracking_target: TrackingTargetSchema | None = None
 
 
+# --- Attention detection + proactive talk (design-spec §6) ----------------
+
+
+class VisionAttentionResponse(BaseModel):
+    """Result of evaluating a frame for attention / proactive talk (§6).
+
+    Commands (look_at / set_expression / proactive_speak) are queued for the
+    device to poll via ``GET /api/bot/{device_id}/commands`` (§11.5); this body
+    reports the evaluation outcome for observability / the dashboard.
+    """
+
+    detections: list[DetectionSchema]
+    tracking_target: TrackingTargetSchema | None = None
+    state: str
+    attention_detected: bool
+    # One of ProactiveDecision (allowed / cooldown / max_per_day / ...), or null
+    # when attention was not detected this frame.
+    proactive_decision: str | None = None
+    proactive_text: str | None = None
+
+
 # --- Bot commands (§11.5) ------------------------------------------------
 
 
