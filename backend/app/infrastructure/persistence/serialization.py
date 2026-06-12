@@ -9,8 +9,9 @@ persistence concerns into the domain.
 from __future__ import annotations
 
 import dataclasses
+import logging
 from enum import Enum
-from typing import Any
+from typing import Any, TypeVar
 
 from app.domain.agent.entities import AgentProfile
 from app.domain.agent.value_objects import AgentType, ResponseMode
@@ -39,6 +40,66 @@ def _to_jsonable(value: Any) -> Any:
     return value
 
 
+_logger = logging.getLogger(__name__)
+
+_E = TypeVar("_E", bound=Enum)
+
+# Single source of truth for every enum-valued field in the persisted settings
+# aggregate, keyed by (section, field) where ``section`` is a top-level key in
+# the settings dict. Both the lenient load path (``_coerce_enum``) and the
+# strict input validator (``validate_enum_inputs``) consume this so the enum
+# knowledge is declared in exactly one place (no per-field if-branches).
+_ENUM_FIELDS: tuple[tuple[str, str, type[Enum]], ...] = (
+    ("agent", "agent_type", AgentType),
+    ("agent", "response_mode", ResponseMode),
+    ("vision", "processing_location", ProcessingLocation),
+    ("vision_stream", "processing_location", ProcessingLocation),
+    ("wake_word", "detection_method", DetectionMethod),
+)
+
+
+def _coerce_enum(enum_cls: type[_E], raw: Any, default: _E) -> _E:
+    """Parse ``raw`` into ``enum_cls``, falling back to ``default`` if unknown.
+
+    Used by the load/deserialize path: per design-spec §13 (stability),
+    settings that fail to load must not crash startup or reads, so an unknown
+    persisted enum value silently degrades to the field default (and is logged).
+    """
+    try:
+        return enum_cls(raw)
+    except ValueError:
+        _logger.warning(
+            "Unknown %s value %r in persisted settings; falling back to default %r",
+            enum_cls.__name__,
+            raw,
+            default.value,
+        )
+        return default
+
+
+def validate_enum_inputs(data: dict[str, Any]) -> None:
+    """Reject unknown enum values in user-supplied settings input.
+
+    Raises ``ValueError`` (mapped to HTTP 422 by the route) when any enum field
+    carries a value the corresponding enum cannot parse. Unlike the load path,
+    user input is validated strictly so configuration mistakes are not silently
+    swallowed into defaults.
+    """
+    invalid: list[str] = []
+    for section, field, enum_cls in _ENUM_FIELDS:
+        section_data = data.get(section)
+        if not isinstance(section_data, dict) or field not in section_data:
+            continue
+        raw = section_data[field]
+        try:
+            enum_cls(raw)
+        except ValueError:
+            allowed = ", ".join(member.value for member in enum_cls)
+            invalid.append(f"{section}.{field}: {raw!r} (allowed: {allowed})")
+    if invalid:
+        raise ValueError("invalid settings value(s): " + "; ".join(invalid))
+
+
 def settings_to_dict(settings: BotSettings) -> dict[str, Any]:
     """Serialize a ``BotSettings`` aggregate to a JSON-safe dict."""
     return _to_jsonable(settings)  # type: ignore[no-any-return]
@@ -54,15 +115,21 @@ def settings_from_dict(device_id: str, data: dict[str, Any]) -> BotSettings:
 
     agent_raw = data.get("agent", {})
     agent = AgentProfile(
-        agent_type=AgentType(agent_raw.get("agent_type", defaults.agent.agent_type.value)),
+        agent_type=_coerce_enum(
+            AgentType,
+            agent_raw.get("agent_type", defaults.agent.agent_type.value),
+            defaults.agent.agent_type,
+        ),
         model_name=agent_raw.get("model_name", defaults.agent.model_name),
         system_prompt=agent_raw.get("system_prompt", defaults.agent.system_prompt),
         tools_enabled=agent_raw.get("tools_enabled", defaults.agent.tools_enabled),
         memory_enabled=agent_raw.get("memory_enabled", defaults.agent.memory_enabled),
         temperature=agent_raw.get("temperature", defaults.agent.temperature),
         max_tokens=agent_raw.get("max_tokens", defaults.agent.max_tokens),
-        response_mode=ResponseMode(
-            agent_raw.get("response_mode", defaults.agent.response_mode.value)
+        response_mode=_coerce_enum(
+            ResponseMode,
+            agent_raw.get("response_mode", defaults.agent.response_mode.value),
+            defaults.agent.response_mode,
         ),
     )
 
@@ -96,16 +163,20 @@ def settings_from_dict(device_id: str, data: dict[str, Any]) -> BotSettings:
         ),
         frame_interval_ms=vision_raw.get("frame_interval_ms", defaults.vision.frame_interval_ms),
         resolution=vision_raw.get("resolution", defaults.vision.resolution),
-        processing_location=ProcessingLocation(
-            vision_raw.get("processing_location", defaults.vision.processing_location.value)
+        processing_location=_coerce_enum(
+            ProcessingLocation,
+            vision_raw.get("processing_location", defaults.vision.processing_location.value),
+            defaults.vision.processing_location,
         ),
     )
 
     wake_raw = data.get("wake_word", {})
     wake_word = WakeWordConfig(
         enabled=wake_raw.get("enabled", defaults.wake_word.enabled),
-        detection_method=DetectionMethod(
-            wake_raw.get("detection_method", defaults.wake_word.detection_method.value)
+        detection_method=_coerce_enum(
+            DetectionMethod,
+            wake_raw.get("detection_method", defaults.wake_word.detection_method.value),
+            defaults.wake_word.detection_method,
         ),
         max_local_active=wake_raw.get("max_local_active", defaults.wake_word.max_local_active),
         wake_words=tuple(
@@ -176,8 +247,10 @@ def _build_vision_stream(raw: dict[str, Any], default: VisionStreamPolicy) -> Vi
         jpeg_quality=raw.get("jpeg_quality", default.jpeg_quality),
         send_only_on_motion=raw.get("send_only_on_motion", default.send_only_on_motion),
         max_frame_size=raw.get("max_frame_size", default.max_frame_size),
-        processing_location=ProcessingLocation(
-            raw.get("processing_location", default.processing_location.value)
+        processing_location=_coerce_enum(
+            ProcessingLocation,
+            raw.get("processing_location", default.processing_location.value),
+            default.processing_location,
         ),
     )
 
