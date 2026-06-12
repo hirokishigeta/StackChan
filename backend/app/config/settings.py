@@ -41,8 +41,36 @@ class AppSettings(BaseSettings):
     # and the API returns a safe fallback so the conversation loop survives.
     agent_request_timeout_s: float = 30.0
 
+    # Speech (ASR) provider, resolved via a registry in di_container. Default
+    # is "dummy" so the process / make check run without native deps or models;
+    # set "sherpa-onnx" in deployment (CLAUDE.md: registry, not if-branching).
     default_speech_provider: str = "dummy"
     default_speech_language: str = "ja"
+
+    # sherpa-onnx model paths and runtime (no hard-coded paths; CLAUDE.md).
+    # Empty by default: SherpaOnnxSpeechRecognizer raises a clear error if used
+    # without these set (lazy-loaded, never at import time).
+    sherpa_tokens_path: str = ""
+    sherpa_encoder_path: str = ""
+    sherpa_decoder_path: str = ""
+    sherpa_joiner_path: str = ""
+    sherpa_sample_rate: int = 16000
+    sherpa_num_threads: int = 1
+
+    # Uplink audio decoder (Opus -> PCM), resolved via a registry. Default is
+    # "raw" (PCM pass-through) so the WS server runs without libopus; set
+    # "opus" once the optional [opus] extra is installed
+    # (docs/backend-protocol.md §3). Uplink Opus default: 16 kHz / mono / 60 ms.
+    audio_decoder: str = "raw"
+    uplink_sample_rate: int = 16000
+    uplink_channels: int = 1
+    uplink_frame_duration_ms: int = 60
+
+    # Downlink (server -> device) audio_params returned in the server hello.
+    # TTS audio itself is out of scope for #7-a (#7-b); these values are still
+    # negotiated now so firmware (#5) can rely on them.
+    downlink_sample_rate: int = 24000
+    downlink_frame_duration_ms: int = 60
 
 
 @lru_cache

@@ -49,13 +49,21 @@ def _client_with_container(container: container_module.Container) -> Iterator[Te
 
 
 def _make_container(
-    tmp_path: object, gateway: AgentGateway | None = None
+    tmp_path: object,
+    gateway: AgentGateway | None = None,
+    *,
+    speech_recognizer: object | None = None,
+    audio_decoder: object | None = None,
 ) -> container_module.Container:
     db_path = f"{tmp_path}/test.db"  # type: ignore[str-bytes-safe]
     test_settings = AppSettings(database_url=f"sqlite:///{db_path}")
     container = container_module.Container(test_settings)
     if gateway is not None:
         container._agent_gateway = gateway  # noqa: SLF001  (test-only injection)
+    if speech_recognizer is not None:
+        container._speech_recognizer = speech_recognizer  # type: ignore[assignment]  # noqa: SLF001
+    if audio_decoder is not None:
+        container._audio_decoder = audio_decoder  # type: ignore[assignment]  # noqa: SLF001
     return container
 
 
@@ -72,6 +80,41 @@ def dummy_agent_client(tmp_path: object) -> Iterator[TestClient]:
     container = _make_container(tmp_path, gateway=DummyAgentGateway())
     with _client_with_container(container) as test_client:
         yield test_client
+
+
+@pytest.fixture
+def audio_ws_client_factory(
+    tmp_path: object,
+) -> Iterator[Callable[..., TestClient]]:
+    """Build a TestClient wired with fake ASR / Opus decoder / AgentGateway.
+
+    Used to exercise the WS audio endpoint without any native deps or models
+    (CLAUDE.md: external deps mocked).
+    """
+    managers: list[object] = []
+
+    def _build(
+        *,
+        gateway: AgentGateway | None = None,
+        speech_recognizer: object | None = None,
+        audio_decoder: object | None = None,
+    ) -> TestClient:
+        container = _make_container(
+            tmp_path,
+            gateway=gateway,
+            speech_recognizer=speech_recognizer,
+            audio_decoder=audio_decoder,
+        )
+        cm = _client_with_container(container)
+        client = cm.__enter__()
+        managers.append(cm)
+        return client
+
+    try:
+        yield _build
+    finally:
+        for cm in reversed(managers):
+            cm.__exit__(None, None, None)  # type: ignore[attr-defined]
 
 
 @pytest.fixture

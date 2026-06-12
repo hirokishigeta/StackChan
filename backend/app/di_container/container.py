@@ -12,6 +12,7 @@ from __future__ import annotations
 from functools import lru_cache
 
 from app.application.ports.agent_gateway import AgentGateway
+from app.application.ports.audio_decoder import AudioDecoder
 from app.application.ports.bot_event_publisher import BotEventPublisher
 from app.application.ports.settings_repository import SettingsRepository
 from app.application.ports.speech_recognizer import SpeechRecognizer
@@ -19,8 +20,9 @@ from app.application.ports.vision_recognizer import VisionRecognizer
 from app.application.ports.wakeword_detector import WakeWordDetector
 from app.config.settings import AppSettings, get_settings
 from app.infrastructure.agent.registry import build_agent_gateway
+from app.infrastructure.audio.registry import build_audio_decoder
 from app.infrastructure.persistence.sqlite_settings_repository import SqliteSettingsRepository
-from app.infrastructure.speech.dummy_speech_recognizer import DummySpeechRecognizer
+from app.infrastructure.speech.registry import build_speech_recognizer
 from app.infrastructure.transport.in_memory_bot_event_publisher import InMemoryBotEventPublisher
 from app.infrastructure.vision.dummy_vision_recognizer import DummyVisionRecognizer
 from app.infrastructure.wakeword.dummy_wakeword_detector import DummyWakeWordDetector
@@ -35,10 +37,18 @@ class Container:
         # Provider resolved via the registry (no if-branching); default is
         # OpenAICompatible (design-spec §11.3 / CLAUDE.md).
         self._agent_gateway: AgentGateway = build_agent_gateway(settings)
-        self._speech_recognizer: SpeechRecognizer = DummySpeechRecognizer()
+        # Provider resolved via the speech registry (sherpa-onnx default; dummy
+        # kept for tests / no-model environments). No if-branching.
+        self._speech_recognizer: SpeechRecognizer = build_speech_recognizer(settings)
+        # Uplink Opus decoder resolved via the audio registry (raw default).
+        self._audio_decoder: AudioDecoder = build_audio_decoder(settings)
         self._vision_recognizer: VisionRecognizer = DummyVisionRecognizer()
         self._wakeword_detector: WakeWordDetector = DummyWakeWordDetector()
         self._event_publisher: BotEventPublisher = InMemoryBotEventPublisher()
+
+    @property
+    def settings(self) -> AppSettings:
+        return self._settings
 
     @property
     def repository(self) -> SettingsRepository:
@@ -51,6 +61,10 @@ class Container:
     @property
     def speech_recognizer(self) -> SpeechRecognizer:
         return self._speech_recognizer
+
+    @property
+    def audio_decoder(self) -> AudioDecoder:
+        return self._audio_decoder
 
     @property
     def vision_recognizer(self) -> VisionRecognizer:
