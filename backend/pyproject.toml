@@ -21,6 +21,16 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
 ]
+# Optional native deps for the WS audio path (Issue #7). Neither is required
+# for `make check`: the codec/recognizer are lazy-loaded and tests use fakes.
+# Uplink Opus decode (libopus binding). Requires libopus on the host.
+opus = [
+    "opuslib>=3.0",
+]
+# sherpa-onnx ASR. Models are a separate download (paths via settings).
+sherpa = [
+    "sherpa-onnx>=1.10",
+]
 
 [tool.uv]
 # dev dependencies are installed by `uv sync --extra dev` (see Makefile)

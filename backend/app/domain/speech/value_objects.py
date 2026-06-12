@@ -12,3 +12,18 @@ class SpeechRecognitionResult:
     text: str
     language: str
     confidence: float
+
+
+@dataclass(frozen=True)
+class AudioFormat:
+    """Negotiated audio frame parameters (docs/backend-protocol.md §3).
+
+    Uplink default is Opus / 16 kHz / mono / 60 ms; the client ``hello`` may
+    override these (``audio_params``). Used by the audio decoder and binary
+    frame codec.
+    """
+
+    codec: str = "opus"
+    sample_rate: int = 16000
+    channels: int = 1
+    frame_duration_ms: int = 60
