@@ -1,8 +1,8 @@
 # ADR-0004: backend 連携は xiaozhi の Protocol 抽象への実装追加で行う
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-06-12
-- 関連: ADR-0001, ADR-0003, docs/repository-analysis.md §5b, Issue #2 / #5
+- 関連: ADR-0001, ADR-0003, docs/repository-analysis.md §5b, docs/backend-protocol.md, Issue #2 / #5 / #7
 
 ## コンテキスト
 
@@ -17,6 +17,7 @@ backend 連携は **xiaozhi の `Protocol` 抽象に backend 用 Protocol 実装
 - 差し替え点は `InitializeProtocol()` の 1 箇所
 - `Ota` のクラウドアクティベーションは無効化し、接続先（NVS `websocket` namespace の url / token）は Setup / BLE から設定する経路を新設する
 - backend 側は Opus エンコード / デコードと xiaozhi 互換の JSON メッセージ（tts / stt / llm / mcp / listen / abort）を扱う Adapter を実装し、design-spec §11 の API スキーマとの差分は backend 側で吸収する
+- **WS メッセージ・音声フォーマット・接続先設定・ターン管理の契約は `docs/backend-protocol.md` で確定した**。スキーマは xiaozhi 既存スキーマを踏襲する（firmware 改変を最小化）。firmware 側 `BackendProtocol`（#5）と backend 側 WS サーバ + ASR（#7）の契約・作業分割・実装順序も同書で定義する
 
 ## 検討した選択肢
 
@@ -33,6 +34,7 @@ backend 連携は **xiaozhi の `Protocol` 抽象に backend 用 Protocol 実装
 
 ## 影響
 
-- design-spec §11 の Bot 向け API 仕様は「backend 内部の正規 API」とし、firmware との間は xiaozhi 互換メッセージを backend 側 Adapter が変換する構成になる（design-spec への反映が必要）
-- バージイン（Phase 8）は xiaozhi の `kListeningModeRealtime` + AEC 経路を再利用できる見込み。CoreS3 で AEC を有効化するには xiaozhi の Kconfig `USE_DEVICE_AEC` の depends に StackChan ボードを追加するパッチが必要（実機検証は別途）
-- 本 ADR は Phase 1 設計（Issue #2）のレビューをもって Accepted にする
+- design-spec §11 の Bot 向け API 仕様は「backend 内部の正規 API」とし、firmware との間は xiaozhi 互換メッセージを backend 側 Adapter が変換する構成になる（具体的な対応づけは `docs/backend-protocol.md` §2.3 / §4.3 に確定）
+- バージイン（Phase 8）は xiaozhi の `kListeningModeRealtime` + AEC 経路を再利用できる見込み。CoreS3 で AEC を有効化するには xiaozhi の Kconfig `USE_DEVICE_AEC` の depends に StackChan ボードを追加するパッチが必要（実機検証は別途。`docs/backend-protocol.md` §6 / §8 未決事項参照）
+- backend に TTS（音声合成）port が存在しないため、下り Opus 音声を返すには TTS port + Opus enc の新設が必要（`docs/backend-protocol.md` §4.3 / §8）
+- 本 ADR は Phase 3/5（Issue #5 / #7）に先立つプロトコル設計の確定（`docs/backend-protocol.md`）をもって **Accepted** とする
