@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 新しい push が来たら同一 PR/ブランチの実行中ジョブをキャンセル
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: backend (fmt / lint / test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      # CI では非破壊（--fix / format での書き換えはしない）。
+      # ローカルの `make check` と同じツール・同じ設定を check-mode で実行する。
+      - name: ruff format --check
+        run: uv run ruff format --check .
+
+      - name: ruff check
+        run: uv run ruff check .
+
+      - name: mypy (strict)
+        run: uv run mypy app
+
+      - name: pytest
+        run: uv run pytest
+
+  firmware:
+    name: firmware (esp-idf build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build firmware (ESP-IDF v5.5.4, esp32s3)
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.4
+          target: esp32s3
+          path: firmware
+          # 外部依存（xiaozhi-esp32 等）を取得してからビルドする
+          command: python3 fetch_repos.py && idf.py build
