@@ -20,6 +20,7 @@ from app.interfaces.api import (
     bot_audio_ws,
     bot_routes,
     ota_routes,
+    server_settings_routes,
     settings_routes,
     speech_routes,
     vision_routes,
@@ -75,6 +76,7 @@ def create_app() -> FastAPI:
     app.include_router(speech_routes.router)
     app.include_router(vision_routes.router)
     app.include_router(settings_routes.router)
+    app.include_router(server_settings_routes.router)
     app.include_router(dashboard_routes.router)
 
     @app.get("/health", tags=["health"])
