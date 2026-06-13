@@ -15,16 +15,21 @@ from app.application.ports.agent_gateway import AgentGateway
 from app.application.ports.audio_decoder import AudioDecoder
 from app.application.ports.audio_encoder import AudioEncoder
 from app.application.ports.bot_event_publisher import BotEventPublisher
+from app.application.ports.server_settings_repository import ServerSettingsRepository
 from app.application.ports.settings_repository import SettingsRepository
 from app.application.ports.speech_recognizer import SpeechRecognizer
 from app.application.ports.speech_synthesizer import SpeechSynthesizer
 from app.application.ports.vision_recognizer import VisionRecognizer
 from app.application.ports.wakeword_detector import WakeWordDetector
 from app.application.use_cases.detect_attention import SessionStore
+from app.application.use_cases.manage_server_settings import ManageServerSettingsUseCase
 from app.config.settings import AppSettings, get_settings
 from app.infrastructure.agent.registry import build_agent_gateway
 from app.infrastructure.audio.encoder_registry import build_audio_encoder
 from app.infrastructure.audio.registry import build_audio_decoder
+from app.infrastructure.persistence.sqlite_server_settings_repository import (
+    SqliteServerSettingsRepository,
+)
 from app.infrastructure.persistence.sqlite_settings_repository import SqliteSettingsRepository
 from app.infrastructure.speech.registry import build_speech_recognizer
 from app.infrastructure.transport.in_memory_bot_event_publisher import InMemoryBotEventPublisher
@@ -39,6 +44,15 @@ class Container:
     def __init__(self, settings: AppSettings) -> None:
         self._settings = settings
         self._repository: SettingsRepository = SqliteSettingsRepository(settings.database_url)
+        # Server-global runtime voice (TTS) settings: persisted dashboard
+        # override layered onto env defaults (ADR-0009). The use case doubles as
+        # the VoiceConfigProvider the synthesizer reads per-call.
+        self._server_settings_repository: ServerSettingsRepository = SqliteServerSettingsRepository(
+            settings.database_url
+        )
+        self._server_settings_use_case = ManageServerSettingsUseCase(
+            self._server_settings_repository, settings
+        )
         # Provider resolved via the registry (no if-branching); default is
         # OpenAICompatible (design-spec §11.3 / CLAUDE.md).
         self._agent_gateway: AgentGateway = build_agent_gateway(settings)
@@ -50,7 +64,9 @@ class Container:
         # Downlink TTS: synthesizer (dummy default; irodori in deployment,
         # ADR-0006) + Opus encoder (raw default). Both registry-resolved, no
         # if-branching; heavy deps stay lazy (#7-b).
-        self._speech_synthesizer: SpeechSynthesizer = build_speech_synthesizer(settings)
+        self._speech_synthesizer: SpeechSynthesizer = build_speech_synthesizer(
+            settings, self._server_settings_use_case
+        )
         self._audio_encoder: AudioEncoder = build_audio_encoder(settings)
         # Provider resolved via the vision registry (dummy default; opencv in
         # deployment with the optional [vision] extra). No if-branching. The
@@ -69,6 +85,14 @@ class Container:
     @property
     def repository(self) -> SettingsRepository:
         return self._repository
+
+    @property
+    def server_settings_repository(self) -> ServerSettingsRepository:
+        return self._server_settings_repository
+
+    @property
+    def server_settings_use_case(self) -> ManageServerSettingsUseCase:
+        return self._server_settings_use_case
 
     @property
     def agent_gateway(self) -> AgentGateway:

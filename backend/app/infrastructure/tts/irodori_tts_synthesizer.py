@@ -47,6 +47,7 @@ import struct
 from typing import Any
 
 from app.application.ports.speech_synthesizer import SpeechSynthesisError, SpeechSynthesizer
+from app.application.ports.voice_config_provider import VoiceConfigProvider
 from app.config.settings import AppSettings
 from app.domain.speech.value_objects import SynthesizedAudio
 
@@ -56,8 +57,17 @@ from .emotion_style import style_text
 class IrodoriTtsSynthesizer(SpeechSynthesizer):
     """Zero-shot Japanese TTS via Irodori-TTS (emoji style control)."""
 
-    def __init__(self, settings: AppSettings) -> None:
+    def __init__(
+        self,
+        settings: AppSettings,
+        voice_config: VoiceConfigProvider | None = None,
+    ) -> None:
         self._settings = settings
+        # When wired, caption/base_style are read per-call from the runtime
+        # voice config (dashboard override) so a change takes effect on the next
+        # synthesize without restart (ADR-0009). Falls back to AppSettings when
+        # absent, preserving the original behavior.
+        self._voice_config = voice_config
         self._runtime: Any | None = None
         # SamplingRequest class, resolved lazily alongside the runtime. Tests may
         # inject both ``_runtime`` and ``_request_cls`` to exercise synthesize()
@@ -155,11 +165,19 @@ class IrodoriTtsSynthesizer(SpeechSynthesizer):
 
             request_cls = SamplingRequest
 
-        styled = style_text(
-            text=text, emotion=emotion, base_style=self._settings.irodori_base_style
-        )
+        # Read caption / base_style from the runtime voice config when wired
+        # (dashboard override, ADR-0009); else fall back to AppSettings defaults.
+        if self._voice_config is not None:
+            voice = self._voice_config.current_voice()
+            base_style = voice.irodori_base_style
+            caption_value = voice.irodori_caption
+        else:
+            base_style = self._settings.irodori_base_style
+            caption_value = self._settings.irodori_caption
+
+        styled = style_text(text=text, emotion=emotion, base_style=base_style)
         reference = self._settings.irodori_reference_wav_path or None
-        caption = self._settings.irodori_caption or None
+        caption = caption_value or None
         try:
             result = runtime.synthesize(
                 request_cls(

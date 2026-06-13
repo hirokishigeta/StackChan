@@ -139,5 +139,6 @@ def test_dashboard_renders(client: TestClient) -> None:
     _register(client)
     resp = client.get("/")
     assert resp.status_code == 200
-    assert "StackChan Dashboard" in resp.text
+    assert "StackChan" in resp.text
+    # The registered device id is injected into the known-device list.
     assert "cores3-001" in resp.text

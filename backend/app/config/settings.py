@@ -24,6 +24,10 @@ class AppSettings(BaseSettings):
     # SQLite by default; private-network local AI backend (design-spec §10).
     database_url: str = "sqlite:///./stackchan.db"
 
+    # Dashboard default device id (settings UI prefill). Not a security boundary;
+    # the dashboard is LAN-only (design-spec §13). Configurable, not hard-coded.
+    dashboard_default_device_id: str = "cores3-001"
+
     # CORS: LAN-only by default (design-spec §13 security).
     cors_allow_origins: list[str] = ["*"]
 

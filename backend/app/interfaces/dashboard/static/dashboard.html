@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>StackChan ダッシュボード</title>
+    <style>
+      :root {
+        --bg: #0f1115;
+        --card: #1a1d24;
+        --fg: #e6e8eb;
+        --muted: #9aa0a6;
+        --accent: #4f8cff;
+        --ok: #2ecc71;
+        --err: #e74c3c;
+        --border: #2a2e37;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+        line-height: 1.5;
+      }
+      header {
+        padding: 16px 24px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      header h1 { font-size: 18px; margin: 0; }
+      header .note { color: var(--muted); font-size: 13px; }
+      main { max-width: 880px; margin: 0 auto; padding: 24px; }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 20px;
+        margin-bottom: 20px;
+      }
+      .card h2 { margin: 0 0 12px; font-size: 16px; }
+      .card .desc { color: var(--muted); font-size: 13px; margin: -6px 0 16px; }
+      label { display: block; font-size: 13px; margin: 12px 0 4px; color: var(--muted); }
+      input[type="text"], input[type="number"], textarea, select {
+        width: 100%;
+        background: #11141a;
+        color: var(--fg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 8px 10px;
+        font-size: 14px;
+        font-family: inherit;
+      }
+      textarea { min-height: 90px; resize: vertical; }
+      .row { display: flex; gap: 16px; flex-wrap: wrap; }
+      .row > div { flex: 1 1 200px; }
+      .check { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+      .check input { width: auto; }
+      .check label { margin: 0; color: var(--fg); }
+      .actions { margin-top: 16px; display: flex; gap: 12px; align-items: center; }
+      button {
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        padding: 9px 18px;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      button.secondary { background: #2a2e37; }
+      button:disabled { opacity: 0.5; cursor: default; }
+      .toast {
+        position: fixed;
+        right: 20px;
+        bottom: 20px;
+        padding: 12px 18px;
+        border-radius: 8px;
+        color: #fff;
+        font-size: 14px;
+        opacity: 0;
+        transform: translateY(10px);
+        transition: opacity 0.2s, transform 0.2s;
+        pointer-events: none;
+        max-width: 360px;
+      }
+      .toast.show { opacity: 1; transform: translateY(0); }
+      .toast.ok { background: var(--ok); }
+      .toast.err { background: var(--err); }
+      .device-bar { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+      .device-bar > div { flex: 1 1 200px; }
+      fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 0 0 16px; padding: 12px 16px; }
+      legend { color: var(--muted); font-size: 13px; padding: 0 6px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>StackChan ダッシュボード</h1>
+      <span class="note">プライベートネットワーク専用 / LAN only</span>
+    </header>
+    <main>
+      <!-- Device selection -->
+      <section class="card">
+        <h2>デバイス選択</h2>
+        <div class="device-bar">
+          <div>
+            <label for="device-select">登録済みデバイス</label>
+            <select id="device-select"></select>
+          </div>
+          <div>
+            <label for="device-id">device_id</label>
+            <input type="text" id="device-id" />
+          </div>
+          <div style="flex: 0 0 auto">
+            <button id="load-btn" class="secondary">読み込み</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Per-device settings -->
+      <form id="device-form">
+        <section class="card">
+          <h2>エージェント設定 (Agent)</h2>
+          <p class="desc">このデバイスの LLM プロンプトと推論パラメータ。</p>
+          <label for="agent-system_prompt">システムプロンプト</label>
+          <textarea id="agent-system_prompt"></textarea>
+          <div class="row">
+            <div>
+              <label for="agent-model_name">モデル名</label>
+              <input type="text" id="agent-model_name" />
+            </div>
+            <div>
+              <label for="agent-agent_type">エージェント種別</label>
+              <select id="agent-agent_type">
+                <option value="OpenAICompatible">OpenAICompatible</option>
+                <option value="HermesAgent">HermesAgent</option>
+                <option value="OpenClaw">OpenClaw</option>
+              </select>
+            </div>
+            <div>
+              <label for="agent-response_mode">応答モード</label>
+              <select id="agent-response_mode">
+                <option value="sync">sync</option>
+                <option value="stream">stream</option>
+              </select>
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label for="agent-temperature">temperature</label>
+              <input type="number" id="agent-temperature" step="0.05" min="0" max="2" />
+            </div>
+            <div>
+              <label for="agent-max_tokens">max_tokens</label>
+              <input type="number" id="agent-max_tokens" step="1" min="1" />
+            </div>
+          </div>
+          <div class="check"><input type="checkbox" id="agent-tools_enabled" /><label for="agent-tools_enabled">ツール有効</label></div>
+          <div class="check"><input type="checkbox" id="agent-memory_enabled" /><label for="agent-memory_enabled">記憶有効</label></div>
+        </section>
+
+        <section class="card">
+          <h2>会話ターン設定 (Conversation Turn)</h2>
+          <div class="check"><input type="checkbox" id="conversation_turn-barge_in_enabled" /><label for="conversation_turn-barge_in_enabled">バージイン有効</label></div>
+          <div class="check"><input type="checkbox" id="conversation_turn-semantic_end_of_turn_enabled" /><label for="conversation_turn-semantic_end_of_turn_enabled">意味的ターン終了検出</label></div>
+          <div class="row">
+            <div>
+              <label for="conversation_turn-vad_threshold">VAD 閾値</label>
+              <input type="number" id="conversation_turn-vad_threshold" step="0.05" min="0" max="1" />
+            </div>
+            <div>
+              <label for="conversation_turn-end_of_turn_silence_ms">ターン終了無音 (ms)</label>
+              <input type="number" id="conversation_turn-end_of_turn_silence_ms" step="50" min="0" />
+            </div>
+            <div>
+              <label for="conversation_turn-max_utterance_duration_ms">最大発話長 (ms)</label>
+              <input type="number" id="conversation_turn-max_utterance_duration_ms" step="100" min="0" />
+            </div>
+          </div>
+          <label for="conversation_turn-interrupt_behavior">割り込み挙動</label>
+          <select id="conversation_turn-interrupt_behavior">
+            <option value="stop">stop</option>
+            <option value="fade_out">fade_out</option>
+            <option value="finish_sentence">finish_sentence</option>
+          </select>
+        </section>
+
+        <section class="card">
+          <h2>音声認識設定 (Speech / ASR)</h2>
+          <div class="row">
+            <div>
+              <label for="speech-language">言語</label>
+              <input type="text" id="speech-language" />
+            </div>
+            <div>
+              <label for="speech-provider">プロバイダ</label>
+              <input type="text" id="speech-provider" />
+            </div>
+          </div>
+          <div class="check"><input type="checkbox" id="speech-vad_enabled" /><label for="speech-vad_enabled">VAD 有効</label></div>
+          <div class="check"><input type="checkbox" id="speech-noise_reduction_enabled" /><label for="speech-noise_reduction_enabled">ノイズ低減</label></div>
+        </section>
+
+        <section class="card">
+          <h2>映像 / 注視設定 (Vision / Attention)</h2>
+          <fieldset>
+            <legend>vision</legend>
+            <div class="row">
+              <div>
+                <label for="vision-provider">プロバイダ</label>
+                <input type="text" id="vision-provider" />
+              </div>
+              <div>
+                <label for="vision-frame_interval_ms">フレーム間隔 (ms)</label>
+                <input type="number" id="vision-frame_interval_ms" step="50" min="0" />
+              </div>
+            </div>
+            <div class="check"><input type="checkbox" id="vision-face_tracking_enabled" /><label for="vision-face_tracking_enabled">顔追跡</label></div>
+            <div class="check"><input type="checkbox" id="vision-motion_tracking_enabled" /><label for="vision-motion_tracking_enabled">動き追跡</label></div>
+          </fieldset>
+          <fieldset>
+            <legend>attention</legend>
+            <div class="check"><input type="checkbox" id="attention-enabled" /><label for="attention-enabled">注視検出有効</label></div>
+            <div class="row">
+              <div>
+                <label for="attention-attention_duration_ms">注視継続時間 (ms)</label>
+                <input type="number" id="attention-attention_duration_ms" step="100" min="0" />
+              </div>
+              <div>
+                <label for="attention-confidence_threshold">信頼度閾値</label>
+                <input type="number" id="attention-confidence_threshold" step="0.05" min="0" max="1" />
+              </div>
+            </div>
+          </fieldset>
+        </section>
+
+        <div class="actions">
+          <button type="submit" id="save-device-btn">デバイス設定を保存</button>
+        </div>
+      </form>
+
+      <!-- Server-global voice settings -->
+      <form id="voice-form">
+        <section class="card">
+          <h2>音声 (TTS) プロンプト — サーバー全体</h2>
+          <p class="desc">
+            全デバイス共通の音声ペルソナ設定です。保存後、次の発話から再起動なしで反映されます。
+          </p>
+          <label for="voice-tts_provider">TTS プロバイダ</label>
+          <select id="voice-tts_provider">
+            <option value="dummy">dummy</option>
+            <option value="irodori">irodori</option>
+          </select>
+          <label for="voice-irodori_caption">声の指示 (caption / VoiceDesign プロンプト)</label>
+          <textarea id="voice-irodori_caption"></textarea>
+          <label for="voice-irodori_base_style">ベーススタイル絵文字 (base_style)</label>
+          <input type="text" id="voice-irodori_base_style" />
+          <div class="actions">
+            <button type="submit" id="save-voice-btn">音声設定を保存</button>
+          </div>
+        </section>
+      </form>
+    </main>
+
+    <div id="toast" class="toast"></div>
+
+    <script>
+      const DEFAULT_DEVICE_ID = window.__DEFAULT_DEVICE_ID__ || "cores3-001";
+      const KNOWN_DEVICES = window.__KNOWN_DEVICES__ || [];
+
+      const $ = (id) => document.getElementById(id);
+
+      function toast(message, ok) {
+        const el = $("toast");
+        el.textContent = message;
+        el.className = "toast show " + (ok ? "ok" : "err");
+        setTimeout(() => {
+          el.className = "toast";
+        }, 3000);
+      }
+
+      function setVal(id, value) {
+        const el = $(id);
+        if (!el) return;
+        if (el.type === "checkbox") el.checked = Boolean(value);
+        else el.value = value === null || value === undefined ? "" : value;
+      }
+      function getVal(id) {
+        const el = $(id);
+        if (el.type === "checkbox") return el.checked;
+        return el.value;
+      }
+      function getNum(id) {
+        const v = $(id).value;
+        return v === "" ? null : Number(v);
+      }
+
+      // ---- per-device settings ----
+      async function loadDevice() {
+        const deviceId = $("device-id").value.trim();
+        if (!deviceId) {
+          toast("device_id を入力してください", false);
+          return;
+        }
+        try {
+          const resp = await fetch(`/api/settings/${encodeURIComponent(deviceId)}`);
+          if (resp.status === 404) {
+            toast("未登録デバイス。保存すると新規作成されます", false);
+            return;
+          }
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const s = await resp.json();
+          fillDeviceForm(s);
+          toast("読み込み完了", true);
+        } catch (e) {
+          toast("読み込み失敗: " + e.message, false);
+        }
+      }
+
+      function fillDeviceForm(s) {
+        const a = s.agent || {};
+        setVal("agent-system_prompt", a.system_prompt);
+        setVal("agent-model_name", a.model_name);
+        setVal("agent-agent_type", a.agent_type);
+        setVal("agent-response_mode", a.response_mode);
+        setVal("agent-temperature", a.temperature);
+        setVal("agent-max_tokens", a.max_tokens);
+        setVal("agent-tools_enabled", a.tools_enabled);
+        setVal("agent-memory_enabled", a.memory_enabled);
+
+        const c = s.conversation_turn || {};
+        setVal("conversation_turn-barge_in_enabled", c.barge_in_enabled);
+        setVal("conversation_turn-semantic_end_of_turn_enabled", c.semantic_end_of_turn_enabled);
+        setVal("conversation_turn-vad_threshold", c.vad_threshold);
+        setVal("conversation_turn-end_of_turn_silence_ms", c.end_of_turn_silence_ms);
+        setVal("conversation_turn-max_utterance_duration_ms", c.max_utterance_duration_ms);
+        setVal("conversation_turn-interrupt_behavior", c.interrupt_behavior);
+
+        const sp = s.speech || {};
+        setVal("speech-language", sp.language);
+        setVal("speech-provider", sp.provider);
+        setVal("speech-vad_enabled", sp.vad_enabled);
+        setVal("speech-noise_reduction_enabled", sp.noise_reduction_enabled);
+
+        const v = s.vision || {};
+        setVal("vision-provider", v.provider);
+        setVal("vision-frame_interval_ms", v.frame_interval_ms);
+        setVal("vision-face_tracking_enabled", v.face_tracking_enabled);
+        setVal("vision-motion_tracking_enabled", v.motion_tracking_enabled);
+
+        const at = s.attention || {};
+        setVal("attention-enabled", at.enabled);
+        setVal("attention-attention_duration_ms", at.attention_duration_ms);
+        setVal("attention-confidence_threshold", at.confidence_threshold);
+      }
+
+      function collectDeviceForm() {
+        return {
+          agent: {
+            system_prompt: getVal("agent-system_prompt"),
+            model_name: getVal("agent-model_name"),
+            agent_type: getVal("agent-agent_type"),
+            response_mode: getVal("agent-response_mode"),
+            temperature: getNum("agent-temperature"),
+            max_tokens: getNum("agent-max_tokens"),
+            tools_enabled: getVal("agent-tools_enabled"),
+            memory_enabled: getVal("agent-memory_enabled"),
+          },
+          conversation_turn: {
+            barge_in_enabled: getVal("conversation_turn-barge_in_enabled"),
+            semantic_end_of_turn_enabled: getVal("conversation_turn-semantic_end_of_turn_enabled"),
+            vad_threshold: getNum("conversation_turn-vad_threshold"),
+            end_of_turn_silence_ms: getNum("conversation_turn-end_of_turn_silence_ms"),
+            max_utterance_duration_ms: getNum("conversation_turn-max_utterance_duration_ms"),
+            interrupt_behavior: getVal("conversation_turn-interrupt_behavior"),
+          },
+          speech: {
+            language: getVal("speech-language"),
+            provider: getVal("speech-provider"),
+            vad_enabled: getVal("speech-vad_enabled"),
+            noise_reduction_enabled: getVal("speech-noise_reduction_enabled"),
+          },
+          vision: {
+            provider: getVal("vision-provider"),
+            frame_interval_ms: getNum("vision-frame_interval_ms"),
+            face_tracking_enabled: getVal("vision-face_tracking_enabled"),
+            motion_tracking_enabled: getVal("vision-motion_tracking_enabled"),
+          },
+          attention: {
+            enabled: getVal("attention-enabled"),
+            attention_duration_ms: getNum("attention-attention_duration_ms"),
+            confidence_threshold: getNum("attention-confidence_threshold"),
+          },
+        };
+      }
+
+      async function saveDevice(ev) {
+        ev.preventDefault();
+        const deviceId = $("device-id").value.trim();
+        if (!deviceId) {
+          toast("device_id を入力してください", false);
+          return;
+        }
+        try {
+          const resp = await fetch(`/api/settings/${encodeURIComponent(deviceId)}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(collectDeviceForm()),
+          });
+          if (!resp.ok) {
+            const detail = await resp.json().catch(() => ({}));
+            throw new Error(detail.detail || `HTTP ${resp.status}`);
+          }
+          fillDeviceForm(await resp.json());
+          toast("デバイス設定を保存しました", true);
+        } catch (e) {
+          toast("保存失敗: " + e.message, false);
+        }
+      }
+
+      // ---- server voice settings ----
+      async function loadVoice() {
+        try {
+          const resp = await fetch("/api/server-settings");
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const v = await resp.json();
+          setVal("voice-tts_provider", v.tts_provider);
+          setVal("voice-irodori_caption", v.irodori_caption);
+          setVal("voice-irodori_base_style", v.irodori_base_style);
+        } catch (e) {
+          toast("音声設定の読み込み失敗: " + e.message, false);
+        }
+      }
+
+      async function saveVoice(ev) {
+        ev.preventDefault();
+        try {
+          const resp = await fetch("/api/server-settings", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              tts_provider: getVal("voice-tts_provider"),
+              irodori_caption: getVal("voice-irodori_caption"),
+              irodori_base_style: getVal("voice-irodori_base_style"),
+            }),
+          });
+          if (!resp.ok) {
+            const detail = await resp.json().catch(() => ({}));
+            throw new Error(JSON.stringify(detail.detail) || `HTTP ${resp.status}`);
+          }
+          const v = await resp.json();
+          setVal("voice-tts_provider", v.tts_provider);
+          setVal("voice-irodori_caption", v.irodori_caption);
+          setVal("voice-irodori_base_style", v.irodori_base_style);
+          toast("音声設定を保存しました", true);
+        } catch (e) {
+          toast("保存失敗: " + e.message, false);
+        }
+      }
+
+      function initDevices() {
+        const sel = $("device-select");
+        sel.innerHTML = "";
+        const ids = KNOWN_DEVICES.length ? KNOWN_DEVICES : [DEFAULT_DEVICE_ID];
+        for (const id of ids) {
+          const opt = document.createElement("option");
+          opt.value = id;
+          opt.textContent = id;
+          sel.appendChild(opt);
+        }
+        const initial = ids.includes(DEFAULT_DEVICE_ID) ? DEFAULT_DEVICE_ID : ids[0];
+        sel.value = initial;
+        $("device-id").value = initial;
+        sel.addEventListener("change", () => {
+          $("device-id").value = sel.value;
+          loadDevice();
+        });
+      }
+
+      $("load-btn").addEventListener("click", loadDevice);
+      $("device-form").addEventListener("submit", saveDevice);
+      $("voice-form").addEventListener("submit", saveVoice);
+
+      initDevices();
+      loadDevice();
+      loadVoice();
+    </script>
+  </body>
+</html>
