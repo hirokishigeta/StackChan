@@ -1,268 +1,458 @@
 <!doctype html>
-<html lang="ja">
+<html lang="ja" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>StackChan ダッシュボード</title>
     <style>
-      :root {
-        --bg: #0f1115;
-        --card: #1a1d24;
-        --fg: #e6e8eb;
-        --muted: #9aa0a6;
+      /* ---- theme tokens ---- */
+      :root,
+      html[data-theme="dark"] {
+        --bg: #0e1014;
+        --bg2: #12151b;
+        --panel: #1a1d24;
+        --panel2: #11141a;
+        --fg: #e8eaed;
+        --muted: #99a0a8;
+        --faint: #6b7178;
+        --border: #292d36;
         --accent: #4f8cff;
         --ok: #2ecc71;
         --err: #e74c3c;
-        --border: #2a2e37;
+        --shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+        /* category accents */
+        --c-agent: #4f8cff;
+        --c-turn: #b06cff;
+        --c-speech: #1fc6a6;
+        --c-vision: #ffa53d;
+        --c-voice: #ff5c93;
+      }
+      html[data-theme="light"] {
+        --bg: #eef1f6;
+        --bg2: #ffffff;
+        --panel: #ffffff;
+        --panel2: #f4f6fa;
+        --fg: #1c2330;
+        --muted: #5a6472;
+        --faint: #8a93a3;
+        --border: #d9dee8;
+        --accent: #2f6bff;
+        --ok: #1aa84f;
+        --err: #d63a2c;
+        --shadow: 0 6px 20px rgba(60, 80, 120, 0.12);
+        --c-agent: #2f6bff;
+        --c-turn: #8a3dff;
+        --c-speech: #009e86;
+        --c-vision: #e8820a;
+        --c-voice: #e03a73;
       }
       * { box-sizing: border-box; }
+      html, body { height: 100%; }
       body {
         margin: 0;
-        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Sans", "Noto Sans JP", sans-serif;
         background: var(--bg);
         color: var(--fg);
-        line-height: 1.5;
+        line-height: 1.55;
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+        transition: background 0.2s, color 0.2s;
       }
+
+      /* ---- header ---- */
       header {
-        padding: 16px 24px;
+        padding: 12px 22px;
         border-bottom: 1px solid var(--border);
         display: flex;
-        align-items: baseline;
-        gap: 12px;
+        align-items: center;
+        gap: 16px;
         flex-wrap: wrap;
+        background: var(--bg2);
+        position: sticky;
+        top: 0;
+        z-index: 5;
       }
-      header h1 { font-size: 18px; margin: 0; }
-      header .note { color: var(--muted); font-size: 13px; }
-      main { max-width: 880px; margin: 0 auto; padding: 24px; }
-      .card {
-        background: var(--card);
+      .brand { display: flex; align-items: center; gap: 10px; }
+      .brand .logo {
+        width: 30px; height: 30px; border-radius: 9px;
+        background: linear-gradient(135deg, var(--c-agent), var(--c-voice));
+        display: grid; place-items: center; font-size: 17px;
+      }
+      header h1 { font-size: 16px; margin: 0; white-space: nowrap; }
+      header .note { color: var(--faint); font-size: 11px; }
+      .spacer { flex: 1; }
+      .device-bar { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+      .device-bar .field { min-width: 150px; }
+      .iconbtn {
+        background: var(--panel); color: var(--fg); border: 1px solid var(--border);
+        border-radius: 9px; width: 40px; height: 40px; font-size: 17px; cursor: pointer;
+        display: grid; place-items: center;
+      }
+      .iconbtn:hover { border-color: var(--accent); }
+
+      /* ---- layout ---- */
+      .layout { display: flex; flex: 1; min-height: 0; }
+      nav.sidebar {
+        flex: 0 0 232px;
+        border-right: 1px solid var(--border);
+        padding: 16px 12px;
+        background: var(--bg2);
+      }
+      .navhint { color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; padding: 14px 12px 6px; }
+      .navitem {
+        --c: var(--accent);
+        display: flex; align-items: center; gap: 11px;
+        width: 100%; text-align: left;
+        background: transparent; color: var(--muted);
+        border: none; border-radius: 9px;
+        padding: 11px 13px; font-size: 14px; cursor: pointer; margin-bottom: 3px;
+        transition: background 0.12s, color 0.12s;
+      }
+      .navitem .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c); flex: none; }
+      .navitem:hover { background: var(--panel); color: var(--fg); }
+      .navitem.active { background: color-mix(in srgb, var(--c) 16%, transparent); color: var(--fg); box-shadow: inset 3px 0 0 var(--c); }
+
+      main.content { flex: 1; min-width: 0; padding: 26px 30px 110px; overflow-y: auto; }
+      .panel { display: none; max-width: 1080px; }
+      .panel.active { display: block; animation: fade 0.16s ease; }
+      @keyframes fade { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+      .panel-head { display: flex; align-items: center; gap: 12px; margin: 0 0 6px; }
+      .panel-head .badge {
+        width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; font-size: 18px;
+        background: color-mix(in srgb, var(--c) 20%, transparent); color: var(--c);
+      }
+      .panel h2 { margin: 0; font-size: 20px; }
+      .panel .desc { color: var(--muted); font-size: 13.5px; margin: 0 0 20px 46px; }
+
+      .group {
+        background: var(--panel);
         border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 20px;
-        margin-bottom: 20px;
+        border-radius: 12px;
+        padding: 18px 20px;
+        margin-bottom: 18px;
+        box-shadow: var(--shadow);
       }
-      .card h2 { margin: 0 0 12px; font-size: 16px; }
-      .card .desc { color: var(--muted); font-size: 13px; margin: -6px 0 16px; }
-      label { display: block; font-size: 13px; margin: 12px 0 4px; color: var(--muted); }
+      .group > h3 {
+        margin: 0 0 16px; font-size: 13px; color: var(--c);
+        font-weight: 700; letter-spacing: 0.02em;
+        display: flex; align-items: center; gap: 8px;
+      }
+      .group > h3::before { content: ""; width: 14px; height: 2px; border-radius: 2px; background: var(--c); }
+
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px 22px; }
+      .grid .full { grid-column: 1 / -1; }
+      .field { display: flex; flex-direction: column; min-width: 0; }
+      label { font-size: 13.5px; margin: 0 0 4px; color: var(--fg); font-weight: 600; }
+      .hint { font-size: 12px; color: var(--muted); margin: 0 0 7px; line-height: 1.45; }
       input[type="text"], input[type="number"], textarea, select {
         width: 100%;
-        background: #11141a;
+        background: var(--panel2);
         color: var(--fg);
         border: 1px solid var(--border);
-        border-radius: 6px;
-        padding: 8px 10px;
+        border-radius: 8px;
+        padding: 9px 11px;
         font-size: 14px;
         font-family: inherit;
+        transition: border-color 0.12s, box-shadow 0.12s;
       }
-      textarea { min-height: 90px; resize: vertical; }
-      .row { display: flex; gap: 16px; flex-wrap: wrap; }
-      .row > div { flex: 1 1 200px; }
-      .check { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
-      .check input { width: auto; }
-      .check label { margin: 0; color: var(--fg); }
-      .actions { margin-top: 16px; display: flex; gap: 12px; align-items: center; }
-      button {
-        background: var(--accent);
-        color: #fff;
-        border: none;
-        border-radius: 6px;
-        padding: 9px 18px;
-        font-size: 14px;
-        cursor: pointer;
+      input:focus, textarea:focus, select:focus {
+        outline: none;
+        border-color: var(--c, var(--accent));
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--c, var(--accent)) 22%, transparent);
       }
-      button.secondary { background: #2a2e37; }
+      textarea { min-height: 120px; resize: vertical; }
+      .check {
+        display: flex; align-items: flex-start; gap: 10px; margin: 10px 0;
+        background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 11px 13px;
+      }
+      .check input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--c, var(--accent)); flex: none; }
+      .check .ctext { display: flex; flex-direction: column; }
+      .check label { margin: 0; }
+      .check .hint { margin: 1px 0 0; }
+
+      /* ---- sticky save bar ---- */
+      footer.savebar {
+        position: sticky; bottom: 0;
+        border-top: 1px solid var(--border);
+        background: color-mix(in srgb, var(--bg2) 92%, transparent);
+        backdrop-filter: blur(8px);
+        padding: 12px 24px;
+        display: flex; gap: 12px; align-items: center; justify-content: flex-end;
+        z-index: 4;
+      }
+      footer.savebar .savehint { margin-right: auto; color: var(--faint); font-size: 12px; }
+      button.primary {
+        background: var(--accent); color: #fff; border: none; border-radius: 9px;
+        padding: 11px 24px; font-size: 14px; font-weight: 600; cursor: pointer; min-height: 42px;
+      }
+      button.primary:hover { filter: brightness(1.08); }
+      button.secondary { background: var(--panel); color: var(--fg); border: 1px solid var(--border); border-radius: 9px; padding: 0 16px; font-size: 14px; cursor: pointer; min-height: 40px; }
       button:disabled { opacity: 0.5; cursor: default; }
+
       .toast {
-        position: fixed;
-        right: 20px;
-        bottom: 20px;
-        padding: 12px 18px;
-        border-radius: 8px;
-        color: #fff;
-        font-size: 14px;
-        opacity: 0;
-        transform: translateY(10px);
-        transition: opacity 0.2s, transform 0.2s;
-        pointer-events: none;
-        max-width: 360px;
+        position: fixed; right: 20px; bottom: 84px;
+        padding: 13px 18px; border-radius: 10px; color: #fff; font-size: 14px;
+        opacity: 0; transform: translateY(10px); transition: opacity 0.2s, transform 0.2s;
+        pointer-events: none; max-width: 360px; z-index: 20; box-shadow: var(--shadow);
       }
       .toast.show { opacity: 1; transform: translateY(0); }
       .toast.ok { background: var(--ok); }
       .toast.err { background: var(--err); }
-      .device-bar { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
-      .device-bar > div { flex: 1 1 200px; }
-      fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 0 0 16px; padding: 12px 16px; }
-      legend { color: var(--muted); font-size: 13px; padding: 0 6px; }
+
+      /* ---- responsive: phones & tablets ---- */
+      @media (max-width: 760px) {
+        header { padding: 10px 14px; gap: 10px; }
+        .device-bar { width: 100%; }
+        .device-bar .field { flex: 1; min-width: 120px; }
+        .layout { flex-direction: column; }
+        nav.sidebar {
+          flex: none; border-right: none; border-bottom: 1px solid var(--border);
+          padding: 8px; display: flex; gap: 8px; overflow-x: auto; position: sticky; top: 0; z-index: 3;
+          background: var(--bg2);
+        }
+        .navhint { display: none; }
+        .navitem { width: auto; white-space: nowrap; padding: 9px 13px; margin: 0; }
+        .navitem.active { box-shadow: none; background: var(--c); color: #fff; }
+        .navitem.active .dot { background: #fff; }
+        main.content { padding: 18px 14px 110px; }
+        .panel .desc { margin-left: 0; }
+        footer.savebar { padding: 10px 14px; }
+        button.primary { flex: 1; }
+        .grid { gap: 14px; }
+      }
     </style>
   </head>
   <body>
     <header>
-      <h1>StackChan ダッシュボード</h1>
-      <span class="note">プライベートネットワーク専用 / LAN only</span>
+      <div class="brand">
+        <div class="logo">🤖</div>
+        <div>
+          <h1>StackChan ダッシュボード</h1>
+          <div class="note">LAN only · 設定はデバイス／サーバーに保存されます</div>
+        </div>
+      </div>
+      <div class="spacer"></div>
+      <div class="device-bar">
+        <div class="field">
+          <label for="device-select">登録済みデバイス</label>
+          <select id="device-select"></select>
+        </div>
+        <div class="field">
+          <label for="device-id">device_id</label>
+          <input type="text" id="device-id" />
+        </div>
+        <button id="load-btn" class="secondary">読み込み</button>
+      </div>
+      <button id="theme-btn" class="iconbtn" title="テーマ切り替え" aria-label="テーマ切り替え">🌙</button>
     </header>
-    <main>
-      <!-- Device selection -->
-      <section class="card">
-        <h2>デバイス選択</h2>
-        <div class="device-bar">
-          <div>
-            <label for="device-select">登録済みデバイス</label>
-            <select id="device-select"></select>
-          </div>
-          <div>
-            <label for="device-id">device_id</label>
-            <input type="text" id="device-id" />
-          </div>
-          <div style="flex: 0 0 auto">
-            <button id="load-btn" class="secondary">読み込み</button>
-          </div>
-        </div>
-      </section>
 
-      <!-- Per-device settings -->
-      <form id="device-form">
-        <section class="card">
-          <h2>エージェント設定 (Agent)</h2>
-          <p class="desc">このデバイスの LLM プロンプトと推論パラメータ。</p>
-          <label for="agent-system_prompt">システムプロンプト</label>
-          <textarea id="agent-system_prompt"></textarea>
-          <div class="row">
-            <div>
-              <label for="agent-model_name">モデル名</label>
-              <input type="text" id="agent-model_name" />
-            </div>
-            <div>
-              <label for="agent-agent_type">エージェント種別</label>
-              <select id="agent-agent_type">
-                <option value="OpenAICompatible">OpenAICompatible</option>
-                <option value="HermesAgent">HermesAgent</option>
-                <option value="OpenClaw">OpenClaw</option>
-              </select>
-            </div>
-            <div>
-              <label for="agent-response_mode">応答モード</label>
-              <select id="agent-response_mode">
-                <option value="sync">sync</option>
-                <option value="stream">stream</option>
-              </select>
-            </div>
-          </div>
-          <div class="row">
-            <div>
-              <label for="agent-temperature">temperature</label>
-              <input type="number" id="agent-temperature" step="0.05" min="0" max="2" />
-            </div>
-            <div>
-              <label for="agent-max_tokens">max_tokens</label>
-              <input type="number" id="agent-max_tokens" step="1" min="1" />
-            </div>
-          </div>
-          <div class="check"><input type="checkbox" id="agent-tools_enabled" /><label for="agent-tools_enabled">ツール有効</label></div>
-          <div class="check"><input type="checkbox" id="agent-memory_enabled" /><label for="agent-memory_enabled">記憶有効</label></div>
-        </section>
+    <div class="layout">
+      <nav class="sidebar">
+        <div class="navhint">デバイス設定</div>
+        <button type="button" class="navitem active" data-target="agent" data-form="device" style="--c: var(--c-agent)"><span class="dot"></span>🧠 エージェント</button>
+        <button type="button" class="navitem" data-target="turn" data-form="device" style="--c: var(--c-turn)"><span class="dot"></span>💬 会話ターン</button>
+        <button type="button" class="navitem" data-target="speech" data-form="device" style="--c: var(--c-speech)"><span class="dot"></span>🎤 音声認識</button>
+        <button type="button" class="navitem" data-target="vision" data-form="device" style="--c: var(--c-vision)"><span class="dot"></span>👁 映像 / 注視</button>
+        <div class="navhint">サーバー全体</div>
+        <button type="button" class="navitem" data-target="voice" data-form="voice" style="--c: var(--c-voice)"><span class="dot"></span>🔊 音声 (TTS)</button>
+      </nav>
 
-        <section class="card">
-          <h2>会話ターン設定 (Conversation Turn)</h2>
-          <div class="check"><input type="checkbox" id="conversation_turn-barge_in_enabled" /><label for="conversation_turn-barge_in_enabled">バージイン有効</label></div>
-          <div class="check"><input type="checkbox" id="conversation_turn-semantic_end_of_turn_enabled" /><label for="conversation_turn-semantic_end_of_turn_enabled">意味的ターン終了検出</label></div>
-          <div class="row">
-            <div>
-              <label for="conversation_turn-vad_threshold">VAD 閾値</label>
-              <input type="number" id="conversation_turn-vad_threshold" step="0.05" min="0" max="1" />
-            </div>
-            <div>
-              <label for="conversation_turn-end_of_turn_silence_ms">ターン終了無音 (ms)</label>
-              <input type="number" id="conversation_turn-end_of_turn_silence_ms" step="50" min="0" />
-            </div>
-            <div>
-              <label for="conversation_turn-max_utterance_duration_ms">最大発話長 (ms)</label>
-              <input type="number" id="conversation_turn-max_utterance_duration_ms" step="100" min="0" />
-            </div>
-          </div>
-          <label for="conversation_turn-interrupt_behavior">割り込み挙動</label>
-          <select id="conversation_turn-interrupt_behavior">
-            <option value="stop">stop</option>
-            <option value="fade_out">fade_out</option>
-            <option value="finish_sentence">finish_sentence</option>
-          </select>
-        </section>
-
-        <section class="card">
-          <h2>音声認識設定 (Speech / ASR)</h2>
-          <div class="row">
-            <div>
-              <label for="speech-language">言語</label>
-              <input type="text" id="speech-language" />
-            </div>
-            <div>
-              <label for="speech-provider">プロバイダ</label>
-              <input type="text" id="speech-provider" />
-            </div>
-          </div>
-          <div class="check"><input type="checkbox" id="speech-vad_enabled" /><label for="speech-vad_enabled">VAD 有効</label></div>
-          <div class="check"><input type="checkbox" id="speech-noise_reduction_enabled" /><label for="speech-noise_reduction_enabled">ノイズ低減</label></div>
-        </section>
-
-        <section class="card">
-          <h2>映像 / 注視設定 (Vision / Attention)</h2>
-          <fieldset>
-            <legend>vision</legend>
-            <div class="row">
-              <div>
-                <label for="vision-provider">プロバイダ</label>
-                <input type="text" id="vision-provider" />
-              </div>
-              <div>
-                <label for="vision-frame_interval_ms">フレーム間隔 (ms)</label>
-                <input type="number" id="vision-frame_interval_ms" step="50" min="0" />
+      <main class="content">
+        <!-- Per-device settings -->
+        <form id="device-form">
+          <section class="panel active" data-panel="agent" style="--c: var(--c-agent)">
+            <div class="panel-head"><div class="badge">🧠</div><h2>エージェント設定</h2></div>
+            <p class="desc">このデバイスの AI の人格・話し方と、使うモデル・推論パラメータを決めます。</p>
+            <div class="group">
+              <h3>プロンプト</h3>
+              <div class="grid">
+                <div class="field full">
+                  <label for="agent-system_prompt">システムプロンプト</label>
+                  <p class="hint">AI の人格・口調・役割を決める指示文。例「あなたは明るく親しみやすい卓上ロボット。短く話す」。</p>
+                  <textarea id="agent-system_prompt" placeholder="あなたは…"></textarea>
+                </div>
               </div>
             </div>
-            <div class="check"><input type="checkbox" id="vision-face_tracking_enabled" /><label for="vision-face_tracking_enabled">顔追跡</label></div>
-            <div class="check"><input type="checkbox" id="vision-motion_tracking_enabled" /><label for="vision-motion_tracking_enabled">動き追跡</label></div>
-          </fieldset>
-          <fieldset>
-            <legend>attention</legend>
-            <div class="check"><input type="checkbox" id="attention-enabled" /><label for="attention-enabled">注視検出有効</label></div>
-            <div class="row">
-              <div>
-                <label for="attention-attention_duration_ms">注視継続時間 (ms)</label>
-                <input type="number" id="attention-attention_duration_ms" step="100" min="0" />
+            <div class="group">
+              <h3>モデル / 推論</h3>
+              <div class="grid">
+                <div class="field">
+                  <label for="agent-model_name">モデル名</label>
+                  <p class="hint">使用する LLM。例: gpt-5-chat-latest。</p>
+                  <input type="text" id="agent-model_name" placeholder="gpt-5-chat-latest" />
+                </div>
+                <div class="field">
+                  <label for="agent-agent_type">エージェント種別</label>
+                  <p class="hint">接続先の種類。通常は OpenAICompatible。</p>
+                  <select id="agent-agent_type">
+                    <option value="OpenAICompatible">OpenAICompatible</option>
+                    <option value="HermesAgent">HermesAgent</option>
+                    <option value="OpenClaw">OpenClaw</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="agent-response_mode">応答モード</label>
+                  <p class="hint">sync=一括で返す / stream=逐次。</p>
+                  <select id="agent-response_mode">
+                    <option value="sync">sync</option>
+                    <option value="stream">stream</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="agent-temperature">temperature</label>
+                  <p class="hint">応答の多様性。0=堅実で安定、高い=創造的でばらつく（0〜2）。</p>
+                  <input type="number" id="agent-temperature" step="0.05" min="0" max="2" />
+                </div>
+                <div class="field">
+                  <label for="agent-max_tokens">max_tokens</label>
+                  <p class="hint">1 回の返答の最大長（トークン数）。長いと冗長・遅くなる。</p>
+                  <input type="number" id="agent-max_tokens" step="1" min="1" />
+                </div>
               </div>
-              <div>
-                <label for="attention-confidence_threshold">信頼度閾値</label>
-                <input type="number" id="attention-confidence_threshold" step="0.05" min="0" max="1" />
+              <div class="check"><input type="checkbox" id="agent-tools_enabled" /><div class="ctext"><label for="agent-tools_enabled">ツール有効</label><p class="hint">関数・ツール呼び出しを許可します。</p></div></div>
+              <div class="check"><input type="checkbox" id="agent-memory_enabled" /><div class="ctext"><label for="agent-memory_enabled">記憶有効</label><p class="hint">会話の文脈を保持します。</p></div></div>
+            </div>
+          </section>
+
+          <section class="panel" data-panel="turn" style="--c: var(--c-turn)">
+            <div class="panel-head"><div class="badge">💬</div><h2>会話ターン設定</h2></div>
+            <p class="desc">「どこで発話が終わったか」を判定する設定と、AI が話している最中の割り込み（バージイン）の挙動。</p>
+            <div class="group">
+              <h3>ターン終了 / VAD</h3>
+              <div class="grid">
+                <div class="field">
+                  <label for="conversation_turn-vad_threshold">VAD 閾値</label>
+                  <p class="hint">発話とみなす音量のしきい値（0〜1）。高いほど小さな音を無視。</p>
+                  <input type="number" id="conversation_turn-vad_threshold" step="0.05" min="0" max="1" />
+                </div>
+                <div class="field">
+                  <label for="conversation_turn-end_of_turn_silence_ms">ターン終了無音 (ms)</label>
+                  <p class="hint">これだけ無音が続いたら「話し終わった」と判断して返答します。短いと食い気味、長いと待つ。</p>
+                  <input type="number" id="conversation_turn-end_of_turn_silence_ms" step="50" min="0" />
+                </div>
+                <div class="field">
+                  <label for="conversation_turn-max_utterance_duration_ms">最大発話長 (ms)</label>
+                  <p class="hint">1 発話の上限。これを超えたら強制的に区切ります（暴走防止）。</p>
+                  <input type="number" id="conversation_turn-max_utterance_duration_ms" step="100" min="0" />
+                </div>
+              </div>
+              <div class="check"><input type="checkbox" id="conversation_turn-semantic_end_of_turn_enabled" /><div class="ctext"><label for="conversation_turn-semantic_end_of_turn_enabled">意味的ターン終了検出</label><p class="hint">文の意味から発話の区切りを推定します（実験的）。</p></div></div>
+            </div>
+            <div class="group">
+              <h3>バージイン（割り込み）</h3>
+              <div class="check"><input type="checkbox" id="conversation_turn-barge_in_enabled" /><div class="ctext"><label for="conversation_turn-barge_in_enabled">バージイン有効</label><p class="hint">AI の発話中でもユーザーが話し始めたら割り込めるようにします（AEC 推奨）。</p></div></div>
+              <div class="grid">
+                <div class="field">
+                  <label for="conversation_turn-interrupt_behavior">割り込み挙動</label>
+                  <p class="hint">割り込まれたときの動作。stop=即停止 / fade_out=フェード / finish_sentence=文を言い切る。</p>
+                  <select id="conversation_turn-interrupt_behavior">
+                    <option value="stop">stop</option>
+                    <option value="fade_out">fade_out</option>
+                    <option value="finish_sentence">finish_sentence</option>
+                  </select>
+                </div>
               </div>
             </div>
-          </fieldset>
-        </section>
+          </section>
 
-        <div class="actions">
-          <button type="submit" id="save-device-btn">デバイス設定を保存</button>
-        </div>
-      </form>
+          <section class="panel" data-panel="speech" style="--c: var(--c-speech)">
+            <div class="panel-head"><div class="badge">🎤</div><h2>音声認識設定 (ASR)</h2></div>
+            <p class="desc">マイク音声をテキストに変換する設定。</p>
+            <div class="group">
+              <div class="grid">
+                <div class="field">
+                  <label for="speech-language">言語</label>
+                  <p class="hint">認識する言語コード。日本語は ja。</p>
+                  <input type="text" id="speech-language" placeholder="ja" />
+                </div>
+                <div class="field">
+                  <label for="speech-provider">プロバイダ</label>
+                  <p class="hint">ASR エンジン。例: sherpa-onnx。</p>
+                  <input type="text" id="speech-provider" placeholder="sherpa-onnx" />
+                </div>
+              </div>
+              <div class="check"><input type="checkbox" id="speech-vad_enabled" /><div class="ctext"><label for="speech-vad_enabled">VAD 有効</label><p class="hint">無音区間を検出して認識精度・効率を上げます。</p></div></div>
+              <div class="check"><input type="checkbox" id="speech-noise_reduction_enabled" /><div class="ctext"><label for="speech-noise_reduction_enabled">ノイズ低減</label><p class="hint">環境ノイズを抑制します。</p></div></div>
+            </div>
+          </section>
 
-      <!-- Server-global voice settings -->
-      <form id="voice-form">
-        <section class="card">
-          <h2>音声 (TTS) プロンプト — サーバー全体</h2>
-          <p class="desc">
-            全デバイス共通の音声ペルソナ設定です。保存後、次の発話から再起動なしで反映されます。
-          </p>
-          <label for="voice-tts_provider">TTS プロバイダ</label>
-          <select id="voice-tts_provider">
-            <option value="dummy">dummy</option>
-            <option value="irodori">irodori</option>
-          </select>
-          <label for="voice-irodori_caption">声の指示 (caption / VoiceDesign プロンプト)</label>
-          <textarea id="voice-irodori_caption"></textarea>
-          <label for="voice-irodori_base_style">ベーススタイル絵文字 (base_style)</label>
-          <input type="text" id="voice-irodori_base_style" />
-          <div class="actions">
-            <button type="submit" id="save-voice-btn">音声設定を保存</button>
-          </div>
-        </section>
-      </form>
-    </main>
+          <section class="panel" data-panel="vision" style="--c: var(--c-vision)">
+            <div class="panel-head"><div class="badge">👁</div><h2>映像 / 注視設定</h2></div>
+            <p class="desc">カメラ映像の送信と、「目が合ったら話しかける」注視検出の設定。</p>
+            <div class="group">
+              <h3>映像 (Vision)</h3>
+              <div class="grid">
+                <div class="field">
+                  <label for="vision-provider">プロバイダ</label>
+                  <p class="hint">画像認識エンジン。例: opencv。</p>
+                  <input type="text" id="vision-provider" placeholder="opencv" />
+                </div>
+                <div class="field">
+                  <label for="vision-frame_interval_ms">フレーム間隔 (ms)</label>
+                  <p class="hint">カメラ画像を送る間隔。短いほど反応が良いが負荷・通信量が増える。</p>
+                  <input type="number" id="vision-frame_interval_ms" step="50" min="0" />
+                </div>
+              </div>
+              <div class="check"><input type="checkbox" id="vision-face_tracking_enabled" /><div class="ctext"><label for="vision-face_tracking_enabled">顔追跡</label><p class="hint">顔の位置を追って視線・首振りを向けます。</p></div></div>
+              <div class="check"><input type="checkbox" id="vision-motion_tracking_enabled" /><div class="ctext"><label for="vision-motion_tracking_enabled">動き追跡</label><p class="hint">動きのある方向に反応します。</p></div></div>
+            </div>
+            <div class="group">
+              <h3>注視 (Attention)</h3>
+              <div class="check"><input type="checkbox" id="attention-enabled" /><div class="ctext"><label for="attention-enabled">注視検出有効</label><p class="hint">ユーザーと目が合ったら自分から話しかけます。</p></div></div>
+              <div class="grid">
+                <div class="field">
+                  <label for="attention-attention_duration_ms">注視継続時間 (ms)</label>
+                  <p class="hint">この時間以上見つめられたら反応します。短いと過敏。</p>
+                  <input type="number" id="attention-attention_duration_ms" step="100" min="0" />
+                </div>
+                <div class="field">
+                  <label for="attention-confidence_threshold">信頼度閾値</label>
+                  <p class="hint">注視と判定する確信度（0〜1）。高いほど誤検出が減る。</p>
+                  <input type="number" id="attention-confidence_threshold" step="0.05" min="0" max="1" />
+                </div>
+              </div>
+            </div>
+          </section>
+        </form>
+
+        <!-- Server-global voice settings -->
+        <form id="voice-form">
+          <section class="panel" data-panel="voice" style="--c: var(--c-voice)">
+            <div class="panel-head"><div class="badge">🔊</div><h2>音声 (TTS) プロンプト</h2></div>
+            <p class="desc">全デバイス共通の声のペルソナ。保存すると次の発話から再起動なしで反映されます。</p>
+            <div class="group">
+              <div class="grid">
+                <div class="field">
+                  <label for="voice-tts_provider">TTS プロバイダ</label>
+                  <p class="hint">音声合成エンジン。irodori=Irodori VoiceDesign、dummy=無音。</p>
+                  <select id="voice-tts_provider">
+                    <option value="dummy">dummy</option>
+                    <option value="irodori">irodori</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="voice-irodori_base_style">ベーススタイル絵文字 (base_style)</label>
+                  <p class="hint">全発話に常時付与する感情・スタイル絵文字。空欄でなし（例: 😏 でクール基調）。</p>
+                  <input type="text" id="voice-irodori_base_style" placeholder="（空でなし）" />
+                </div>
+                <div class="field full">
+                  <label for="voice-irodori_caption">声の指示 (caption / VoiceDesign プロンプト)</label>
+                  <p class="hint">声色を言葉で指定します（VoiceDesign）。例「明るいが静かめの少女の声。少し高めで、親しみやすく、楽しそうに話してください。」</p>
+                  <textarea id="voice-irodori_caption" placeholder="明るいが静かめの少女の声…"></textarea>
+                </div>
+              </div>
+            </div>
+          </section>
+        </form>
+      </main>
+    </div>
+
+    <footer class="savebar">
+      <span class="savehint">変更したら保存してください</span>
+      <button type="submit" form="device-form" id="save-device-btn" class="primary">デバイス設定を保存</button>
+      <button type="submit" form="voice-form" id="save-voice-btn" class="primary" style="display: none">音声設定を保存</button>
+    </footer>
 
     <div id="toast" class="toast"></div>
 
@@ -295,6 +485,44 @@
       function getNum(id) {
         const v = $(id).value;
         return v === "" ? null : Number(v);
+      }
+
+      // ---- theme (dark / light, persisted) ----
+      function applyTheme(theme) {
+        document.documentElement.setAttribute("data-theme", theme);
+        $("theme-btn").textContent = theme === "dark" ? "🌙" : "☀️";
+        try { localStorage.setItem("stackchan-theme", theme); } catch (e) {}
+      }
+      function initTheme() {
+        let theme = null;
+        try { theme = localStorage.getItem("stackchan-theme"); } catch (e) {}
+        if (!theme) {
+          theme = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        }
+        applyTheme(theme);
+        $("theme-btn").addEventListener("click", () => {
+          const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+          applyTheme(next);
+        });
+      }
+
+      // ---- tab navigation ----
+      function initTabs() {
+        const items = document.querySelectorAll("nav.sidebar .navitem");
+        items.forEach((item) => {
+          item.addEventListener("click", () => {
+            items.forEach((i) => i.classList.remove("active"));
+            item.classList.add("active");
+            const target = item.dataset.target;
+            document.querySelectorAll(".panel").forEach((p) => {
+              p.classList.toggle("active", p.dataset.panel === target);
+            });
+            const isVoice = item.dataset.form === "voice";
+            $("save-device-btn").style.display = isVoice ? "none" : "";
+            $("save-voice-btn").style.display = isVoice ? "" : "none";
+            document.querySelector("main.content").scrollTop = 0;
+          });
+        });
       }
 
       // ---- per-device settings ----
@@ -483,6 +711,8 @@
       $("device-form").addEventListener("submit", saveDevice);
       $("voice-form").addEventListener("submit", saveVoice);
 
+      initTheme();
+      initTabs();
       initDevices();
       loadDevice();
       loadVoice();
