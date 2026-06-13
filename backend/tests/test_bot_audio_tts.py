@@ -12,6 +12,7 @@ deps, no models, no native codec (CLAUDE.md). Verifies:
 
 from __future__ import annotations
 
+import struct
 from collections.abc import Callable
 
 from app.application.ports.agent_gateway import AgentGateway
@@ -154,19 +155,27 @@ def test_emotion_maps_to_irodori_emoji_style(
         ws.receive_json()  # tts.start
         ws.receive_json()  # sentence_start
         _drain_to_stop(ws)
-    assert synth.styled == ["おはよう😴"]
+    # No constant base by default; sleepy emoji (😪) appended to the text.
+    assert synth.styled == ["おはよう😪"]
 
 
 def test_full_emotion_emoji_table() -> None:
-    assert style_text(text="x", emotion="neutral") == "x"
-    assert style_text(text="x", emotion="happy") == "x😊"
-    assert style_text(text="x", emotion="sad") == "x😢"
-    assert style_text(text="x", emotion="angry") == "x😠"
-    assert style_text(text="x", emotion="curious") == "x🤔"
-    assert style_text(text="x", emotion="surprised") == "x😲"
-    assert style_text(text="x", emotion="sleepy") == "x😴"
-    # Unknown emotion falls back to no emoji (plain text).
-    assert style_text(text="x", emotion="bogus") == "x"
+    # Voice character comes from the VoiceDesign caption; per-emotion emoji are
+    # appended (no constant base by default). angry is restrained (no extra
+    # emoji). Unknown -> neutral fallback.
+    assert style_text(text="x", emotion="neutral") == "x⏸️"
+    assert style_text(text="x", emotion="happy") == "x🤭"
+    assert style_text(text="x", emotion="sad") == "x😮‍💨😪"
+    assert style_text(text="x", emotion="angry") == "x"
+    assert style_text(text="x", emotion="curious") == "x⏸️🫣"
+    assert style_text(text="x", emotion="surprised") == "x🫣"
+    assert style_text(text="x", emotion="sleepy") == "x😪"
+    assert style_text(text="x", emotion="shy") == "x🫣🫶👂"
+    assert style_text(text="x", emotion="intimate") == "x🫣🫶👂"
+    # Unknown emotion falls back to the neutral style.
+    assert style_text(text="x", emotion="bogus") == "x⏸️"
+    # Base style is overridable (e.g. a persona overlay can be re-enabled).
+    assert style_text(text="x", emotion="happy", base_style="😏") == "😏x🤭"
 
 
 def test_synth_failure_falls_back_to_text_only(
@@ -253,3 +262,122 @@ def test_dummy_synth_scales_with_text() -> None:
     long = synth.synthesize(text="あ" * 50)
     assert short.sample_rate == 24000
     assert len(long.pcm) > len(short.pcm)
+
+
+def test_irodori_synth_raises_without_optional_deps_or_model() -> None:
+    # With neither torch/irodori_tts installed nor a model path, synthesize must
+    # raise SpeechSynthesisError (lazy, never crashing at import) so the WS loop
+    # degrades to text-only. This must hold in the make-check env (no heavy deps).
+    from app.config.settings import AppSettings
+    from app.infrastructure.tts.irodori_tts_synthesizer import IrodoriTtsSynthesizer
+
+    synth = IrodoriTtsSynthesizer(AppSettings())  # construction stays lazy
+    try:
+        synth.synthesize(text="やあ", emotion="happy")
+    except SpeechSynthesisError:
+        return
+    raise AssertionError("expected SpeechSynthesisError without deps/model")
+
+
+def test_irodori_float_to_pcm16_clamps_and_flattens() -> None:
+    from app.infrastructure.tts.irodori_tts_synthesizer import IrodoriTtsSynthesizer
+
+    # Nested (channels, samples)-style float list, with out-of-range values.
+    pcm = IrodoriTtsSynthesizer._float_to_pcm16([[0.0, 1.5, -2.0, -0.5]])
+    assert len(pcm) == 4 * 2  # 4 samples -> PCM16
+    samples = struct.unpack("<4h", pcm)
+    assert samples[0] == 0
+    assert samples[1] == 32767  # clamped from 1.5
+    assert samples[2] == -32767  # clamped from -2.0
+    assert samples[3] == round(-0.5 * 32767.0)
+
+
+def test_irodori_synthesize_uses_runtime_and_no_ref_fallback() -> None:
+    # Inject a fake runtime to exercise synthesize() without heavy deps: verify
+    # styled text reaches SamplingRequest, no_ref=True when ref unset, and
+    # result.audio/sample_rate are converted to SynthesizedAudio.
+    from app.config.settings import AppSettings
+    from app.infrastructure.tts.irodori_tts_synthesizer import IrodoriTtsSynthesizer
+
+    class _FakeRequest:
+        def __init__(self, **kwargs: object) -> None:
+            self.__dict__.update(kwargs)
+
+    class _FakeResult:
+        audio = [[0.5, -0.5]]
+        sample_rate = 48000
+
+    captured: dict[str, object] = {}
+
+    class _FakeRuntime:
+        def synthesize(self, req: object) -> _FakeResult:
+            captured["text"] = req.text  # type: ignore[attr-defined]
+            captured["caption"] = req.caption  # type: ignore[attr-defined]
+            captured["ref_wav"] = req.ref_wav  # type: ignore[attr-defined]
+            captured["no_ref"] = req.no_ref  # type: ignore[attr-defined]
+            return _FakeResult()
+
+    caption = "明るく楽しそうな少女の声"
+    synth = IrodoriTtsSynthesizer(AppSettings(irodori_model_path="x", irodori_caption=caption))
+    synth._runtime = _FakeRuntime()  # pre-seed so _load_runtime short-circuits
+    synth._request_cls = _FakeRequest
+    out = synth.synthesize(text="げんき", emotion="happy")
+
+    assert out.sample_rate == 48000
+    assert len(out.pcm) == 2 * 2
+    assert captured["text"] == "げんき🤭"  # no base by default + happy emoji
+    assert captured["caption"] == caption  # VoiceDesign caption flows through
+    assert captured["ref_wav"] is None
+    assert captured["no_ref"] is True
+
+
+def test_irodori_synthesize_passes_ref_wav_when_set() -> None:
+    from app.config.settings import AppSettings
+    from app.infrastructure.tts.irodori_tts_synthesizer import IrodoriTtsSynthesizer
+
+    class _FakeRequest:
+        def __init__(self, **kwargs: object) -> None:
+            self.__dict__.update(kwargs)
+
+    class _FakeResult:
+        audio = [0.0]
+        sample_rate = 48000
+
+    captured: dict[str, object] = {}
+
+    class _FakeRuntime:
+        def synthesize(self, req: object) -> _FakeResult:
+            captured["ref_wav"] = req.ref_wav  # type: ignore[attr-defined]
+            captured["no_ref"] = req.no_ref  # type: ignore[attr-defined]
+            return _FakeResult()
+
+    synth = IrodoriTtsSynthesizer(
+        AppSettings(irodori_model_path="x", irodori_reference_wav_path="/tmp/ref.wav")
+    )
+    synth._runtime = _FakeRuntime()
+    synth._request_cls = _FakeRequest
+    synth.synthesize(text="やあ", emotion="neutral")
+    assert captured["ref_wav"] == "/tmp/ref.wav"
+    assert captured["no_ref"] is False
+
+
+def test_irodori_synthesize_normalizes_runtime_errors() -> None:
+    from app.config.settings import AppSettings
+    from app.infrastructure.tts.irodori_tts_synthesizer import IrodoriTtsSynthesizer
+
+    class _FakeRequest:
+        def __init__(self, **kwargs: object) -> None:
+            self.__dict__.update(kwargs)
+
+    class _BoomRuntime:
+        def synthesize(self, req: object) -> object:
+            raise RuntimeError("cuda oom")
+
+    synth = IrodoriTtsSynthesizer(AppSettings(irodori_model_path="x"))
+    synth._runtime = _BoomRuntime()
+    synth._request_cls = _FakeRequest
+    try:
+        synth.synthesize(text="やあ")
+    except SpeechSynthesisError:
+        return
+    raise AssertionError("engine error must surface as SpeechSynthesisError")
