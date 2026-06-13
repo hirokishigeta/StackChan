@@ -146,6 +146,23 @@ class AppSettings(BaseSettings):
     irodori_reference_wav_path: str = ""
     irodori_device: str = "cpu"
     irodori_sample_rate: int = 48000
+    # Codec / precision for the Irodori InferenceRuntime (match infer.py argparse
+    # defaults; ADR-0006). codec runs on CPU by default to keep VRAM for the model.
+    irodori_codec_repo: str = "Aratako/Semantic-DACVAE-Japanese-32dim"
+    irodori_model_precision: str = "fp32"
+    irodori_codec_device: str = "cpu"
+    irodori_codec_precision: str = "fp32"
+    # Persona base style emoji prepended to every utterance.
+    # Empty disables the base. Per-emotion emoji are appended on top (see
+    # app.infrastructure.tts.emotion_style).
+    irodori_base_style: str = ""
+    # Voice-design caption: a natural-language description of the target voice,
+    # used by VoiceDesign checkpoints (Irodori-TTS-600M-v3-VoiceDesign) to
+    # synthesize without a reference wav (no_ref). Passed to SamplingRequest.
+    # Empty disables caption conditioning. This is the persona's "声の指示".
+    irodori_caption: str = (
+        "明るいが静かめの少女の声。少し高めで、親しみやすく、楽しそうに話してください。"
+    )
 
 
 @lru_cache
