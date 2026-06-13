@@ -198,6 +198,11 @@ class AppSettings(BaseSettings):
     irodori_caption: str = (
         "明るいが静かめの少女の声。少し高めで、親しみやすく、楽しそうに話してください。"
     )
+    # Fixed sampling seed for Irodori so the voice (speaker timbre) stays
+    # consistent across turns. VoiceDesign without a reference wav samples a new
+    # speaker each call when this is None, so the voice drifts; a fixed seed pins
+    # it (the caption still drives the style). Set None for random each turn.
+    irodori_seed: int | None = 1234
 
 
 @lru_cache
