@@ -89,6 +89,24 @@ class AppSettings(BaseSettings):
     uplink_channels: int = 1
     uplink_frame_duration_ms: int = 60
 
+    # Server-side VAD (end-of-utterance detection) for xiaozhi `listen mode:auto`
+    # (docs/backend-protocol.md §6, design-spec §7.5). Real devices in `auto` mode
+    # never send `listen stop`; they stream PCM and expect the *server* to detect
+    # the end of the utterance and run ASR -> agent -> reply. We do an energy (RMS)
+    # based VAD on the decoded 16-bit LE mono PCM, with no external model. These
+    # are config (no hard-coded thresholds; CLAUDE.md). `manual` mode is unaffected:
+    # it finalizes on `listen stop` exactly as before.
+    vad_enabled: bool = True
+    # RMS amplitude threshold (0..32767). A frame at/above this counts as speech.
+    vad_rms_threshold: int = 500
+    # Minimum cumulative speech before a trailing silence can finalize a turn.
+    # Guards against finalizing on a brief noise spike (avoids empty-ASR spam).
+    vad_min_speech_ms: int = 300
+    # Trailing silence (hangover) after speech that triggers end-of-utterance.
+    vad_silence_ms: int = 800
+    # Safety cap: force end-of-utterance once an utterance reaches this length.
+    vad_max_utterance_ms: int = 15000
+
     # Downlink (server -> device) audio_params returned in the server hello.
     # These values are negotiated so firmware (#5) can rely on them; the
     # downlink TTS audio path (#7-b) resamples/encodes to these.

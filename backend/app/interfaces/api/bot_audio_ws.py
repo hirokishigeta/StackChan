@@ -22,8 +22,10 @@ container; no business logic lives here (CLAUDE.md layer rules).
 from __future__ import annotations
 
 import logging
+import math
+import struct
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -55,6 +57,28 @@ logger = logging.getLogger("uvicorn.error")
 
 
 @dataclass
+class _VadState:
+    """Energy-based end-of-utterance detection state for one utterance.
+
+    Tracks how much speech and trailing silence we've seen so we can decide when
+    the user has stopped talking (xiaozhi `listen mode:auto`, design-spec §7.5).
+    Durations are accumulated in milliseconds from each frame's PCM length so the
+    detector is independent of the negotiated frame size.
+    """
+
+    speech_ms: float = 0.0
+    silence_ms: float = 0.0
+    utterance_ms: float = 0.0
+    in_speech: bool = False
+
+    def reset(self) -> None:
+        self.speech_ms = 0.0
+        self.silence_ms = 0.0
+        self.utterance_ms = 0.0
+        self.in_speech = False
+
+
+@dataclass
 class _Session:
     """Per-connection state for one device's audio channel."""
 
@@ -65,6 +89,10 @@ class _Session:
     listening: bool = False
     aborted: bool = False
     frames_rx: int = 0
+    # xiaozhi listen mode of the current turn ("auto" | "manual" | "realtime").
+    # Only "auto" relies on server-side VAD; "manual" finalizes on `listen stop`.
+    listen_mode: str = "manual"
+    vad: _VadState = field(default_factory=_VadState)
     pcm_buffer: bytearray = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
@@ -160,7 +188,13 @@ class BotAudioHandler:
             session.aborted = False
             session.frames_rx = 0
             session.pcm_buffer = bytearray()
+            # mode defaults to "manual" so an absent field never silently turns
+            # on VAD; real auto-mode devices always send mode:"auto" (§6).
+            session.listen_mode = str(msg.get("mode", "manual"))
+            session.vad.reset()
         elif state == "stop":
+            # Manual mode: the device tells us when the utterance ends. (Auto-mode
+            # devices never send stop; the VAD path in _on_binary finalizes them.)
             session.listening = False
             await self._finalize_turn(ws, session)
         elif state == "detect":
@@ -222,6 +256,73 @@ class BotAudioHandler:
                 len(session.pcm_buffer) + len(pcm),
             )
         session.pcm_buffer.extend(pcm)
+        await self._run_vad(ws, session, pcm)
+
+    # -- server-side VAD (end-of-utterance for listen mode:auto) ------------
+
+    @staticmethod
+    def _rms16(pcm: bytes) -> float:
+        """RMS amplitude of 16-bit LE mono PCM (0..32767). Empty -> 0."""
+        n = len(pcm) // 2
+        if n == 0:
+            return 0.0
+        samples = struct.unpack(f"<{n}h", pcm[: n * 2])
+        return math.sqrt(sum(s * s for s in samples) / n)
+
+    async def _run_vad(self, ws: WebSocket, session: _Session, pcm: bytes) -> None:
+        """Detect end-of-utterance by energy and finalize (auto mode only).
+
+        Speech (RMS >= threshold) extends the utterance; once enough speech has
+        been seen, a run of trailing silence (>= silence_ms) finalizes the turn.
+        A max-utterance cap force-finalizes runaway streams. After finalizing we
+        keep ``listening`` True and reset VAD state to await the next utterance,
+        because auto-mode connections stay open across turns (design-spec §7.5).
+        """
+        settings = self._settings
+        if not settings.vad_enabled or session.listen_mode != "auto":
+            return
+        # Frame duration derived from sample length so VAD is frame-size agnostic.
+        sample_rate = session.audio_format.sample_rate or settings.uplink_sample_rate
+        n_samples = len(pcm) // 2
+        if sample_rate <= 0 or n_samples == 0:
+            return
+        frame_ms = n_samples * 1000.0 / sample_rate
+
+        vad = session.vad
+        vad.utterance_ms += frame_ms
+        is_speech = self._rms16(pcm) >= settings.vad_rms_threshold
+        if is_speech:
+            if not vad.in_speech and vad.speech_ms == 0.0:
+                logger.info("VAD: speech start")
+            vad.in_speech = True
+            vad.speech_ms += frame_ms
+            vad.silence_ms = 0.0
+        else:
+            vad.silence_ms += frame_ms
+
+        ended_on_silence = (
+            vad.speech_ms >= settings.vad_min_speech_ms
+            and vad.silence_ms >= settings.vad_silence_ms
+        )
+        forced = vad.utterance_ms >= settings.vad_max_utterance_ms
+        if not (ended_on_silence or forced):
+            return
+
+        reason = "max-utterance" if forced and not ended_on_silence else "silence"
+        logger.info(
+            "VAD: end-of-utterance (%s) -> finalize buf=%dB",
+            reason,
+            len(session.pcm_buffer),
+        )
+        # On a forced cut with no detected speech, the buffer is just noise/silence:
+        # reset without invoking ASR to avoid empty-ASR spam (requirement 8).
+        if forced and vad.speech_ms < settings.vad_min_speech_ms:
+            session.pcm_buffer = bytearray()
+            vad.reset()
+            return
+        vad.reset()
+        # Stay listening: auto-mode keeps streaming for the next utterance.
+        await self._finalize_turn(ws, session)
 
     # -- turn handling ------------------------------------------------------
 
