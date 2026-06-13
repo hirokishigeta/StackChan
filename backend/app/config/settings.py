@@ -119,11 +119,13 @@ class AppSettings(BaseSettings):
     downlink_sample_rate: int = 24000
     downlink_channels: int = 1
     downlink_frame_duration_ms: int = 60
-    # Downlink TTS frames are paced at ~real time so the device's jitter buffer
-    # doesn't overflow (choppy audio). This many frames are sent up front to
-    # prime the buffer; the rest follow one per frame_duration. ~8 * 60ms =
-    # ~480ms of lead. Larger = more latency tolerance but later barge-in.
-    downlink_prime_frames: int = 8
+    # Downlink TTS frames are paced at real time (deadline-scheduled) so the
+    # device's jitter buffer neither overflows (flooding -> dropped frames) nor
+    # underruns (drift -> crackle). This many frames are sent up front as a
+    # cushion to absorb per-frame jitter; the rest follow on a monotonic
+    # deadline. ~15 * 60ms = ~900ms of lead. Larger = more jitter tolerance but
+    # later barge-in and more buffered audio on the device.
+    downlink_prime_frames: int = 15
     # Silence prepended to each TTS reply so the device's audio-output spin-up
     # after `tts.start` drops silence, not the opening syllable (which was
     # otherwise not voiced). ~300ms covers typical CoreS3 startup.
