@@ -421,6 +421,14 @@ class BotAudioHandler:
                 src_rate=audio.sample_rate,
                 dst_rate=downlink.sample_rate,
             )
+            # Lead-in silence: the device needs a moment after `tts.start` to
+            # spin up its audio output, during which the first real frames are
+            # dropped (the opening syllable is not voiced). Prepend silence so
+            # that startup gap eats silence instead of the start of speech.
+            lead_ms = self._settings.downlink_lead_silence_ms
+            if lead_ms > 0:
+                lead_bytes = (downlink.sample_rate * lead_ms // 1000) * downlink.channels * 2
+                pcm = b"\x00" * lead_bytes + pcm
             payloads = self._encoder.encode(pcm=pcm, audio_format=downlink)
         except (SpeechSynthesisError, AudioEncodeError, ValueError) as exc:
             # Text-only fallback (#7-a behaviour). Connection stays alive, but

@@ -137,6 +137,36 @@ def test_tts_audio_frames_between_start_and_stop(
     assert sum(len(f) for f in frames) == 4800
 
 
+def test_downlink_lead_silence_prepended(
+    audio_ws_client_factory: Callable[..., TestClient],
+) -> None:
+    # The device drops the opening frames while its audio output spins up after
+    # tts.start (the first syllable wasn't voiced). A lead-in of silence absorbs
+    # that gap: the stream must start with >= the configured silence and that
+    # silence must be all-zero PCM (RawPcm encoder = passthrough, easy to check).
+    synth = _RecordingSynth(sample_count=4800, sample_rate=48000)  # 0.1 s @ 48k
+    client = audio_ws_client_factory(
+        gateway=_FakeAgent(AgentReply(text="げんき", emotion="happy")),
+        speech_synthesizer=synth,
+        audio_encoder=RawPcmAudioEncoder(),
+        settings_overrides={"downlink_lead_silence_ms": 300},
+    )
+    with _connect(client) as ws:
+        ws.send_json(_HELLO)
+        ws.receive_json()
+        ws.send_json({"type": "listen", "state": "detect", "text": "ねえ"})
+        ws.receive_json()  # stt
+        ws.receive_json()  # llm
+        ws.receive_json()  # tts.start
+        ws.receive_json()  # sentence_start
+        frames = _drain_to_stop(ws)
+    stream = b"".join(frames)
+    # 300 ms @ 24 kHz mono PCM16 = 7200 samples = 14400 bytes of leading silence.
+    lead_bytes = (24000 * 300 // 1000) * 1 * 2
+    assert len(stream) >= lead_bytes + 4800  # lead-in + the 0.1 s of content
+    assert stream[:lead_bytes] == b"\x00" * lead_bytes  # opening is silence
+
+
 def test_emotion_maps_to_irodori_emoji_style(
     audio_ws_client_factory: Callable[..., TestClient],
 ) -> None:
