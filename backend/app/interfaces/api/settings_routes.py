@@ -51,11 +51,15 @@ def update_settings(
     HTTP 422 rather than silently coerced to a default (the lenient fallback in
     ``settings_from_dict`` is reserved for the load path, design-spec §13).
     """
-    try:
-        validate_enum_inputs(body)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
     current = use_case.get_settings(device_id) or BotSettings.default(device_id)
     merged = {**settings_to_dict(current), **body}
-    updated = use_case.update_settings(settings_from_dict(device_id, merged))
+    try:
+        validate_enum_inputs(body)
+        # ``settings_from_dict`` rebuilds the frozen domain aggregate, whose value
+        # objects validate themselves (e.g. empty wake-word phrase / threshold out
+        # of [0, 1]); surface those as 422 rather than a 500.
+        rebuilt = settings_from_dict(device_id, merged)
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    updated = use_case.update_settings(rebuilt)
     return settings_to_dict(updated)

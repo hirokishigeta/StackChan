@@ -115,6 +115,53 @@ def test_wakeword_endpoint(client: TestClient) -> None:
     assert body["wake_words"][0]["id"] == "ww-1"
 
 
+def test_settings_default_wake_words_served(client: TestClient) -> None:
+    _register(client)
+    # A freshly registered device exposes the default wake-word list.
+    resp = client.get("/api/bot/cores3-001/wakeword")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["wake_words"]) >= 1
+    assert all(w["phrase"].strip() for w in body["wake_words"])
+
+
+def test_settings_put_rejects_empty_wake_word_phrase(client: TestClient) -> None:
+    _register(client)
+    resp = client.put(
+        "/api/settings/cores3-001",
+        json={"wake_word": {"wake_words": [{"id": "ww-1", "phrase": "  "}]}},
+    )
+    assert resp.status_code == 422
+
+
+def test_settings_put_rejects_bad_wake_word_threshold(client: TestClient) -> None:
+    _register(client)
+    resp = client.put(
+        "/api/settings/cores3-001",
+        json={"wake_word": {"wake_words": [{"id": "ww-1", "phrase": "hello", "threshold": 1.5}]}},
+    )
+    assert resp.status_code == 422
+
+
+def test_settings_wake_words_roundtrip(client: TestClient) -> None:
+    _register(client)
+    payload = {
+        "wake_word": {
+            "enabled": True,
+            "detection_method": "local",
+            "wake_words": [
+                {"id": "ww-a", "phrase": "おはよう", "threshold": 0.6, "enabled": True},
+                {"id": "ww-b", "phrase": "bye bot", "threshold": 0.8, "enabled": False},
+            ],
+        }
+    }
+    put = client.put("/api/settings/cores3-001", json=payload)
+    assert put.status_code == 200
+    got = client.get("/api/settings/cores3-001").json()["wake_word"]["wake_words"]
+    assert [w["phrase"] for w in got] == ["おはよう", "bye bot"]
+    assert got[1]["enabled"] is False
+
+
 def test_settings_get_put_roundtrip(client: TestClient) -> None:
     _register(client)
     put = client.put(

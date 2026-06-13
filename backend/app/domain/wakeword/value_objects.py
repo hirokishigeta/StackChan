@@ -15,10 +15,21 @@ class DetectionMethod(StrEnum):
 
 @dataclass(frozen=True)
 class WakeWordEntry:
-    """A single registered wake word (design-spec §8.1)."""
+    """A single registered wake word (design-spec §8.1).
+
+    ``threshold`` is the detection sensitivity in the closed range [0, 1]
+    (higher = stricter / fewer false positives). ``phrase`` must be a
+    non-empty, non-whitespace string.
+    """
 
     id: str
     phrase: str
     model_name: str = "default"
     threshold: float = 0.7
     enabled: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.phrase or not self.phrase.strip():
+            raise ValueError("wake word phrase must not be empty")
+        if not 0.0 <= self.threshold <= 1.0:
+            raise ValueError(f"wake word threshold must be within [0, 1], got {self.threshold!r}")

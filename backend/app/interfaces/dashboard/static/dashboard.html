@@ -26,6 +26,7 @@
         --c-speech: #1fc6a6;
         --c-vision: #ffa53d;
         --c-voice: #ff5c93;
+        --c-wakeword: #2bd4a0;
       }
       html[data-theme="light"] {
         --bg: #eef1f6;
@@ -45,6 +46,7 @@
         --c-speech: #009e86;
         --c-vision: #e8820a;
         --c-voice: #e03a73;
+        --c-wakeword: #11a982;
       }
       * { box-sizing: border-box; }
       html, body { height: 100%; }
@@ -189,6 +191,13 @@
       button.primary:hover { filter: brightness(1.08); }
       button.secondary { background: var(--panel); color: var(--fg); border: 1px solid var(--border); border-radius: 9px; padding: 0 16px; font-size: 14px; cursor: pointer; min-height: 40px; }
       button:disabled { opacity: 0.5; cursor: default; }
+      /* wake-word dynamic rows */
+      .ww-row { display: grid; grid-template-columns: 1fr 110px auto auto; gap: 10px 14px; align-items: end; padding: 12px 0; border-bottom: 1px solid var(--border); }
+      .ww-row:last-of-type { border-bottom: none; }
+      .ww-row .check { align-self: center; }
+      .ww-row button.secondary { min-height: 38px; align-self: center; }
+      .ww-empty { color: var(--faint); font-size: 13px; padding: 8px 0; }
+      @media (max-width: 640px) { .ww-row { grid-template-columns: 1fr 1fr; } }
 
       .toast {
         position: fixed; right: 20px; bottom: 84px;
@@ -254,6 +263,7 @@
         <button type="button" class="navitem" data-target="turn" data-form="device" style="--c: var(--c-turn)"><span class="dot"></span>💬 会話ターン</button>
         <button type="button" class="navitem" data-target="speech" data-form="device" style="--c: var(--c-speech)"><span class="dot"></span>🎤 音声認識</button>
         <button type="button" class="navitem" data-target="vision" data-form="device" style="--c: var(--c-vision)"><span class="dot"></span>👁 映像 / 注視</button>
+        <button type="button" class="navitem" data-target="wakeword" data-form="device" style="--c: var(--c-wakeword)"><span class="dot"></span>🗣 ウェイクワード</button>
         <div class="navhint">サーバー全体</div>
         <button type="button" class="navitem" data-target="voice" data-form="voice" style="--c: var(--c-voice)"><span class="dot"></span>🔊 音声 (TTS)</button>
       </nav>
@@ -412,6 +422,35 @@
                   <input type="number" id="attention-confidence_threshold" step="0.05" min="0" max="1" />
                 </div>
               </div>
+            </div>
+          </section>
+
+          <section class="panel" data-panel="wakeword" style="--c: var(--c-wakeword)">
+            <div class="panel-head"><div class="badge">🗣</div><h2>ウェイクワード設定</h2></div>
+            <p class="desc">話しかけて呼び出す合言葉。検出はデバイス側 (esp-sr) で行い、ここで登録したリストをデバイスが取得します。複数登録できます。</p>
+            <div class="group">
+              <div class="check"><input type="checkbox" id="wake_word-enabled" /><div class="ctext"><label for="wake_word-enabled">ウェイクワード有効</label><p class="hint">オフにすると合言葉での呼び出しを無効化します。</p></div></div>
+              <div class="grid">
+                <div class="field">
+                  <label for="wake_word-detection_method">検出場所</label>
+                  <p class="hint">local=デバイス側 (esp-sr)、backend=PC 側。通常は local。</p>
+                  <select id="wake_word-detection_method">
+                    <option value="local">local</option>
+                    <option value="backend">backend</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="wake_word-max_local_active">デバイス側同時有効数</label>
+                  <p class="hint">local 検出で同時に有効化できる上限。超過分は無効になります。</p>
+                  <input type="number" id="wake_word-max_local_active" step="1" min="1" />
+                </div>
+              </div>
+            </div>
+            <div class="group">
+              <h3>登録ワード</h3>
+              <p class="hint">合言葉のフレーズ、有効/無効、感度 (0〜1。高いほど厳しく誤検出が減る) を指定します。</p>
+              <div id="ww-rows"></div>
+              <div><button type="button" id="ww-add-btn" class="secondary">＋ ワードを追加</button></div>
             </div>
           </section>
         </form>
@@ -582,6 +621,102 @@
         setVal("attention-enabled", at.enabled);
         setVal("attention-attention_duration_ms", at.attention_duration_ms);
         setVal("attention-confidence_threshold", at.confidence_threshold);
+
+        const ww = s.wake_word || {};
+        setVal("wake_word-enabled", ww.enabled);
+        setVal("wake_word-detection_method", ww.detection_method || "local");
+        setVal("wake_word-max_local_active", ww.max_local_active);
+        renderWakeWordRows(Array.isArray(ww.wake_words) ? ww.wake_words : []);
+      }
+
+      // ---- wake words (dynamic rows) ----
+      let wwSeq = 0;
+      function wakeWordRowTemplate(w) {
+        const idx = wwSeq++;
+        const id = (w && w.id) || `ww-${Date.now()}-${idx}`;
+        const phrase = (w && w.phrase) || "";
+        const modelName = (w && w.model_name) || "default";
+        const threshold = w && w.threshold !== undefined && w.threshold !== null ? w.threshold : 0.7;
+        const enabled = w ? Boolean(w.enabled) : true;
+        const row = document.createElement("div");
+        row.className = "ww-row";
+        row.dataset.wwId = id;
+        row.dataset.wwModel = modelName;
+        const phraseField = document.createElement("div");
+        phraseField.className = "field";
+        phraseField.innerHTML =
+          '<label>フレーズ</label><p class="hint">呼び出す合言葉。空欄は保存できません。</p>';
+        const phraseInput = document.createElement("input");
+        phraseInput.type = "text";
+        phraseInput.className = "ww-phrase";
+        phraseInput.placeholder = "スタックチャン";
+        phraseInput.value = phrase;
+        phraseField.appendChild(phraseInput);
+        const threshField = document.createElement("div");
+        threshField.className = "field";
+        threshField.innerHTML =
+          '<label>感度 (0〜1)</label><p class="hint">高いほど厳しい。</p>';
+        const threshInput = document.createElement("input");
+        threshInput.type = "number";
+        threshInput.className = "ww-threshold";
+        threshInput.step = "0.05";
+        threshInput.min = "0";
+        threshInput.max = "1";
+        threshInput.value = threshold;
+        threshField.appendChild(threshInput);
+        const checkWrap = document.createElement("div");
+        checkWrap.className = "check";
+        const checkInput = document.createElement("input");
+        checkInput.type = "checkbox";
+        checkInput.className = "ww-enabled";
+        checkInput.checked = enabled;
+        const ctext = document.createElement("div");
+        ctext.className = "ctext";
+        ctext.innerHTML = "<label>有効</label>";
+        checkWrap.appendChild(checkInput);
+        checkWrap.appendChild(ctext);
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "secondary";
+        removeBtn.textContent = "削除";
+        removeBtn.addEventListener("click", () => {
+          row.remove();
+          if (!$("ww-rows").querySelector(".ww-row")) renderWakeWordRows([]);
+        });
+        row.appendChild(phraseField);
+        row.appendChild(threshField);
+        row.appendChild(checkWrap);
+        row.appendChild(removeBtn);
+        return row;
+      }
+      function renderWakeWordRows(words) {
+        const host = $("ww-rows");
+        host.innerHTML = "";
+        if (!words.length) {
+          const empty = document.createElement("p");
+          empty.className = "ww-empty";
+          empty.textContent = "登録されたウェイクワードはありません。「＋ ワードを追加」で追加してください。";
+          host.appendChild(empty);
+          return;
+        }
+        for (const w of words) host.appendChild(wakeWordRowTemplate(w));
+      }
+      function collectWakeWords() {
+        const rows = $("ww-rows").querySelectorAll(".ww-row");
+        const out = [];
+        rows.forEach((row) => {
+          const phrase = row.querySelector(".ww-phrase").value.trim();
+          if (!phrase) return; // skip blank rows; backend would 422 on empty
+          const threshRaw = row.querySelector(".ww-threshold").value;
+          out.push({
+            id: row.dataset.wwId,
+            phrase,
+            model_name: row.dataset.wwModel || "default",
+            threshold: threshRaw === "" ? 0.7 : Number(threshRaw),
+            enabled: row.querySelector(".ww-enabled").checked,
+          });
+        });
+        return out;
       }
 
       function collectDeviceForm() {
@@ -620,6 +755,12 @@
             enabled: getVal("attention-enabled"),
             attention_duration_ms: getNum("attention-attention_duration_ms"),
             confidence_threshold: getNum("attention-confidence_threshold"),
+          },
+          wake_word: {
+            enabled: getVal("wake_word-enabled"),
+            detection_method: getVal("wake_word-detection_method"),
+            max_local_active: getNum("wake_word-max_local_active"),
+            wake_words: collectWakeWords(),
           },
         };
       }
@@ -706,6 +847,13 @@
           loadDevice();
         });
       }
+
+      $("ww-add-btn").addEventListener("click", () => {
+        const host = $("ww-rows");
+        const empty = host.querySelector(".ww-empty");
+        if (empty) empty.remove();
+        host.appendChild(wakeWordRowTemplate(null));
+      });
 
       $("load-btn").addEventListener("click", loadDevice);
       $("device-form").addEventListener("submit", saveDevice);
