@@ -150,3 +150,10 @@ def test_dashboard_render_injects_devices() -> None:
     assert '"dev-a"' in html
     assert '"dev-b"' in html
     assert "window.__KNOWN_DEVICES__" in html
+
+
+def test_dashboard_has_wakeword_tab() -> None:
+    html = dashboard_routes._render([], "dev-a")  # noqa: SLF001
+    assert 'data-target="wakeword"' in html
+    assert 'data-panel="wakeword"' in html
+    assert "ウェイクワード" in html

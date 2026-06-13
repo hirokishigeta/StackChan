@@ -30,7 +30,19 @@ def test_bot_with_connection_status_returns_new_instance() -> None:
 def test_default_settings_have_expected_device_id() -> None:
     settings = BotSettings.default("cores3-001")
     assert settings.device_id == "cores3-001"
-    assert settings.wake_word.wake_words == ()
+    # New devices get a sensible default wake-word list the user can edit.
+    assert len(settings.wake_word.wake_words) >= 1
+    assert all(w.phrase.strip() for w in settings.wake_word.wake_words)
+
+
+def test_wake_word_entry_rejects_empty_phrase() -> None:
+    with pytest.raises(ValueError, match="phrase must not be empty"):
+        WakeWordEntry(id="ww-x", phrase="   ")
+
+
+def test_wake_word_entry_rejects_threshold_out_of_range() -> None:
+    with pytest.raises(ValueError, match="threshold must be within"):
+        WakeWordEntry(id="ww-x", phrase="hello", threshold=1.5)
 
 
 def test_resolve_active_wake_words_caps_local_detection() -> None:
