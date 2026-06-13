@@ -178,6 +178,11 @@ class IrodoriTtsSynthesizer(SpeechSynthesizer):
         styled = style_text(text=text, emotion=emotion, base_style=base_style)
         reference = self._settings.irodori_reference_wav_path or None
         caption = caption_value or None
+        # Fix the sampling seed so the voice (speaker timbre) is consistent across
+        # turns. With no reference wav, VoiceDesign samples a fresh speaker each
+        # call when seed is None, which makes the voice drift between replies; a
+        # fixed seed pins it while the caption still drives the style.
+        seed = self._settings.irodori_seed
         try:
             result = runtime.synthesize(
                 request_cls(
@@ -187,6 +192,7 @@ class IrodoriTtsSynthesizer(SpeechSynthesizer):
                     no_ref=reference is None,
                     num_candidates=1,
                     decode_mode="sequential",
+                    seed=seed,
                 )
             )
         except Exception as exc:  # noqa: BLE001 - normalize engine errors
