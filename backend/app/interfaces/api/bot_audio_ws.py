@@ -444,27 +444,40 @@ class BotAudioHandler:
             len(payloads),
             session.binary_version,
         )
-        # Pace the downlink at ~real time. Sending all frames in a tight loop
-        # floods the device's small jitter buffer, which then drops frames
-        # (choppy / cut-out audio). We prime a short burst to fill the buffer,
-        # then emit one frame per frame_duration so the device plays smoothly.
-        # Pacing also keeps `speaking` True for the real playback duration, so
-        # the half-duplex gate stays closed until the device actually finishes
-        # (otherwise the still-playing voice leaks back into the mic as echo).
+        # Pace the downlink at real time. Sending all frames in a tight loop
+        # floods the device's small jitter buffer, which then drops frames. But
+        # a naive per-frame ``sleep(frame_s)`` *drifts*: each iteration takes a
+        # bit more than frame_s (sleep + send overhead), so we feed slightly
+        # slower than real time and the device buffer slowly drains -> periodic
+        # underruns (audible crackle/プツプツ). Instead we prime a cushion, then
+        # schedule each remaining frame against a fixed monotonic deadline so
+        # there is no cumulative drift; the cushion absorbs per-frame jitter.
+        # Pacing also keeps `speaking` True for the real playback duration so the
+        # half-duplex gate stays closed until the device actually finishes.
         frame_ms = downlink.frame_duration_ms or self._settings.downlink_frame_duration_ms
         frame_s = max(frame_ms, 1) / 1000.0
         prime = min(self._settings.downlink_prime_frames, len(payloads))
+        loop = asyncio.get_running_loop()
         sent = 0
+        t0 = 0.0
         for idx, payload in enumerate(payloads):
             if session.aborted:
                 break
             frame = encode_frame(payload=payload, version=session.binary_version)
             await ws.send_bytes(frame)
             sent += 1
-            if idx >= prime:
-                await asyncio.sleep(frame_s)
-        # Let the primed-but-not-yet-played frames drain on the device before the
-        # caller reopens the mic (keeps the echo gate closed through the tail).
+            if idx == prime - 1:
+                # Cushion delivered; start the real-time clock from here.
+                t0 = loop.time()
+            elif idx >= prime:
+                # Frame idx is due at t0 + (idx-prime+1)*frame_s; sleep until then
+                # (deadline-relative, so latency on one frame is recovered, not
+                # accumulated). A negative delay means we're behind -> send now.
+                delay = t0 + (idx - prime + 1) * frame_s - loop.time()
+                if delay > 0:
+                    await asyncio.sleep(delay)
+        # Let the cushion (primed-but-not-yet-played frames) drain on the device
+        # before the caller reopens the mic (keeps the echo gate closed).
         if not session.aborted and prime:
             await asyncio.sleep(prime * frame_s)
         logger.info("TTS downlink: sent %d/%d frame(s) (paced)", sent, len(payloads))
