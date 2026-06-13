@@ -41,7 +41,7 @@ from app.config.settings import AppSettings
 from app.di_container import container as container_module
 from app.domain.agent.entities import AgentProfile
 from app.domain.agent.value_objects import AgentReply
-from app.domain.speech.entities import SpeechRecognitionConfig
+from app.domain.speech.entities import ConversationTurnConfig, SpeechRecognitionConfig
 from app.domain.speech.value_objects import AudioFormat
 from app.infrastructure.audio.resample import resample_pcm16
 from app.infrastructure.transport.audio_frame_codec import (
@@ -98,6 +98,11 @@ class _Session:
     # does not re-trigger VAD into an echo loop.
     speaking: bool = False
     vad: _VadState = field(default_factory=_VadState)
+    # Per-device turn-taking config (end-of-turn silence, max utterance, ...),
+    # resolved from the device's BotSettings at listen start so the dashboard can
+    # tune turn-taking per device. ``None`` means no stored profile -> the global
+    # VAD settings are used as the default.
+    turn: ConversationTurnConfig | None = None
     pcm_buffer: bytearray = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
@@ -199,6 +204,7 @@ class BotAudioHandler:
             # mode defaults to "manual" so an absent field never silently turns
             # on VAD; real auto-mode devices always send mode:"auto" (§6).
             session.listen_mode = str(msg.get("mode", "manual"))
+            session.turn = self._resolve_turn(session.device_id)
             session.vad.reset()
         elif state == "stop":
             # Manual mode: the device tells us when the utterance ends. (Auto-mode
@@ -314,11 +320,16 @@ class BotAudioHandler:
         else:
             vad.silence_ms += frame_ms
 
+        # End-of-turn silence and max-utterance come from the per-device turn
+        # config (dashboard-tunable) so we only finalize once the user has truly
+        # paused; fall back to the global VAD defaults when no profile is stored.
+        turn = session.turn
+        silence_ms = turn.end_of_turn_silence_ms if turn else settings.vad_silence_ms
+        max_utterance_ms = turn.max_utterance_duration_ms if turn else settings.vad_max_utterance_ms
         ended_on_silence = (
-            vad.speech_ms >= settings.vad_min_speech_ms
-            and vad.silence_ms >= settings.vad_silence_ms
+            vad.speech_ms >= settings.vad_min_speech_ms and vad.silence_ms >= silence_ms
         )
-        forced = vad.utterance_ms >= settings.vad_max_utterance_ms
+        forced = vad.utterance_ms >= max_utterance_ms
         if not (ended_on_silence or forced):
             return
 
@@ -399,6 +410,14 @@ class BotAudioHandler:
             session.speaking = False
             session.vad.reset()
             session.pcm_buffer = bytearray()
+        # Conversation lifecycle (§7): if the agent judged the conversation over,
+        # tell the device to stop listening so it returns to idle (wake-word
+        # wait) instead of auto-re-listening. The firmware honors a server-sent
+        # `listen stop` by going idle.
+        if reply.end_conversation:
+            logger.info("agent_turn: end_conversation -> stop listening")
+            session.listening = False
+            await ws.send_json({"type": "listen", "state": "stop"})
 
     async def _send_tts_audio(self, ws: WebSocket, session: _Session, reply: AgentReply) -> None:
         """Synthesize the reply and send downlink Opus frames (#7-b).
@@ -421,14 +440,9 @@ class BotAudioHandler:
                 src_rate=audio.sample_rate,
                 dst_rate=downlink.sample_rate,
             )
-            # Lead-in silence: the device needs a moment after `tts.start` to
-            # spin up its audio output, during which the first real frames are
-            # dropped (the opening syllable is not voiced). Prepend silence so
-            # that startup gap eats silence instead of the start of speech.
-            lead_ms = self._settings.downlink_lead_silence_ms
-            if lead_ms > 0:
-                lead_bytes = (downlink.sample_rate * lead_ms // 1000) * downlink.channels * 2
-                pcm = b"\x00" * lead_bytes + pcm
+            # No lead-in silence here: the head-clip is root-fixed on the device
+            # (firmware pre-enables the audio output on `tts.start` so the amp is
+            # warm before the first frame). The downlink is still paced below.
             payloads = self._encoder.encode(pcm=pcm, audio_format=downlink)
         except (SpeechSynthesisError, AudioEncodeError, ValueError) as exc:
             # Text-only fallback (#7-a behaviour). Connection stays alive, but
@@ -485,6 +499,10 @@ class BotAudioHandler:
     def _resolve_profile(self, device_id: str) -> AgentProfile:
         settings = self._repository.get_settings(device_id)
         return settings.agent if settings is not None else AgentProfile()
+
+    def _resolve_turn(self, device_id: str) -> ConversationTurnConfig | None:
+        settings = self._repository.get_settings(device_id)
+        return settings.conversation_turn if settings is not None else None
 
 
 @router.websocket("/{device_id}/audio")

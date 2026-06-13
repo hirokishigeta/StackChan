@@ -126,10 +126,6 @@ class AppSettings(BaseSettings):
     # deadline. ~15 * 60ms = ~900ms of lead. Larger = more jitter tolerance but
     # later barge-in and more buffered audio on the device.
     downlink_prime_frames: int = 15
-    # Silence prepended to each TTS reply so the device's audio-output spin-up
-    # after `tts.start` drops silence, not the opening syllable (which was
-    # otherwise not voiced). ~300ms covers typical CoreS3 startup.
-    downlink_lead_silence_ms: int = 300
 
     # Downlink audio encoder (PCM -> Opus), resolved via a registry. Default is
     # "raw" (PCM pass-through, framed) so the WS server runs without libopus;

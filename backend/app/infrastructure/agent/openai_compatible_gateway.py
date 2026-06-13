@@ -29,8 +29,12 @@ from app.domain.agent.value_objects import AgentAction, AgentReply, ProactiveEve
 _RESPONSE_FORMAT_INSTRUCTION = (
     "Always reply with a single JSON object and nothing else, shaped as: "
     '{"text": string, "emotion": string, '
-    '"actions": [{"type": string, "value": string|null}]}. '
-    "emotion is one of: neutral, happy, sad, angry, curious, surprised, sleepy."
+    '"actions": [{"type": string, "value": string|null}], '
+    '"end_conversation": boolean}. '
+    "emotion is one of: neutral, happy, sad, angry, curious, surprised, sleepy. "
+    "Set end_conversation to true ONLY when the conversation has clearly and "
+    "naturally finished — e.g. the user says goodbye/thanks-that's-all, or there "
+    "is nothing left to do. Otherwise set it to false so we keep listening."
 )
 
 # Type of the injectable client factory: () -> AsyncClient.
@@ -175,7 +179,10 @@ def _try_parse_structured(content: str) -> AgentReply | None:
     reply_text = str(data["text"])
     emotion = str(data.get("emotion", "neutral")) or "neutral"
     actions = _map_actions(data.get("actions"), emotion)
-    return AgentReply(text=reply_text, emotion=emotion, actions=actions)
+    end_conversation = bool(data.get("end_conversation", False))
+    return AgentReply(
+        text=reply_text, emotion=emotion, actions=actions, end_conversation=end_conversation
+    )
 
 
 def _map_actions(raw: Any, emotion: str) -> tuple[AgentAction, ...]:
