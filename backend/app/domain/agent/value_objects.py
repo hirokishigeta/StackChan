@@ -36,6 +36,11 @@ class AgentReply:
     text: str
     emotion: str = "neutral"
     actions: tuple[AgentAction, ...] = ()
+    # True when the agent judges the conversation has naturally ended (the user
+    # said goodbye / there is nothing left to do). The WS loop then stops the
+    # device's auto-listen so it returns to idle until the next wake word
+    # (design-spec §7: turn/conversation lifecycle).
+    end_conversation: bool = False
 
 
 @dataclass(frozen=True)
