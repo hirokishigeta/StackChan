@@ -65,3 +65,6 @@ sdkconfig
 sdkconfig.old
 
 xiaozhi-esp32/
+
+# Host test build dir (cmake -S tests -B build-host-tests)
+/build-host-tests/
