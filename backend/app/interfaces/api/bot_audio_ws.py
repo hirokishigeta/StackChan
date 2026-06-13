@@ -49,7 +49,9 @@ from app.infrastructure.transport.audio_frame_codec import (
 
 router = APIRouter(prefix="/api/bot", tags=["bot-audio"])
 
-logger = logging.getLogger("stackchan.bot_audio")
+# Use uvicorn's logger so these diagnostics are visible under `uvicorn` without
+# extra logging config (the default config does not surface arbitrary loggers).
+logger = logging.getLogger("uvicorn.error")
 
 
 @dataclass
