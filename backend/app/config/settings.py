@@ -131,11 +131,13 @@ class AppSettings(BaseSettings):
     # later barge-in and more buffered audio on the device.
     downlink_prime_frames: int = 15
     # Silence (ms) prepended to each TTS reply. The CoreS3 drops a fixed window
-    # at playback start (I2S/codec startup transient, confirmed via serial log;
-    # the synthesized audio is complete), so this silence absorbs that drop
-    # instead of the opening syllable. ~600ms covers the observed drop; tune per
-    # deployment. 0 disables.
-    downlink_lead_silence_ms: int = 600
+    # (~1s) at playback start — its audio pipeline takes ~1s to start producing
+    # sound after entering the speaking state (confirmed via serial log + on-
+    # device A/B: 800ms still clipped, 1200ms played the opening cleanly; the
+    # synthesized audio itself is complete and amp/firmware warm-up did not help).
+    # This silence absorbs that drop instead of the opening syllable. Tune per
+    # deployment (trade latency vs safety); 0 disables.
+    downlink_lead_silence_ms: int = 1200
 
     # Downlink audio encoder (PCM -> Opus), resolved via a registry. Default is
     # "raw" (PCM pass-through, framed) so the WS server runs without libopus;
