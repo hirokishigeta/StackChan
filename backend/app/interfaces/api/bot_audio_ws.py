@@ -21,6 +21,7 @@ container; no business logic lives here (CLAUDE.md layer rules).
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -47,6 +48,8 @@ from app.infrastructure.transport.audio_frame_codec import (
 )
 
 router = APIRouter(prefix="/api/bot", tags=["bot-audio"])
+
+logger = logging.getLogger("stackchan.bot_audio")
 
 
 @dataclass
@@ -94,6 +97,7 @@ class BotAudioHandler:
     async def run(self, websocket: WebSocket, device_id: str) -> None:
         await websocket.accept()
         session = _Session(device_id=device_id, session_id=uuid.uuid4().hex)
+        logger.info("WS connect device=%s session=%s", device_id, session.session_id)
         try:
             while True:
                 message = await websocket.receive()
@@ -147,6 +151,7 @@ class BotAudioHandler:
 
     async def _handle_listen(self, ws: WebSocket, session: _Session, msg: dict[str, Any]) -> None:
         state = str(msg.get("state"))
+        logger.info("listen state=%s text=%r", state, msg.get("text"))
         if state == "start":
             session.listening = True
             session.aborted = False
@@ -210,6 +215,7 @@ class BotAudioHandler:
             return
         audio = bytes(session.pcm_buffer)
         session.pcm_buffer = bytearray()
+        logger.info("finalize: pcm=%d bytes", len(audio))
         config = SpeechRecognitionConfig(
             provider=self._settings.default_speech_provider,
             language=self._settings.default_speech_language,
@@ -217,8 +223,10 @@ class BotAudioHandler:
         try:
             result = await self._asr.recognize(audio=audio, config=config)
         except Exception:  # noqa: BLE001 - ASR failure must not kill the session
+            logger.exception("ASR failed")
             await ws.send_json({"type": "tts", "state": "stop"})
             return
+        logger.info("stt=%r", result.text)
         if not result.text:
             await ws.send_json({"type": "tts", "state": "stop"})
             return
@@ -227,13 +235,16 @@ class BotAudioHandler:
     async def _run_agent_turn(self, ws: WebSocket, session: _Session, user_text: str) -> None:
         # Recognized user text (xiaozhi `stt`, §2.2).
         await ws.send_json({"type": "stt", "text": user_text})
+        logger.info("agent_turn user=%r", user_text)
         profile = self._resolve_profile(session.device_id)
         try:
             reply = await self._agent.chat(message=user_text, profile=profile, context=None)
-        except AgentError:
+        except AgentError as exc:
             # Safe fallback (ADR-0005 / design-spec §13): keep the loop alive.
+            logger.warning("agent error -> safe fallback (LLM未設定/失敗?): %s", exc)
             await ws.send_json({"type": "tts", "state": "stop"})
             return
+        logger.info("reply emotion=%s text=%r", reply.emotion, reply.text)
         if session.aborted:
             return
         # Emotion -> expression (xiaozhi `llm`, §2.2 -> firmware SetEmotion).
