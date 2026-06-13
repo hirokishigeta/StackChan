@@ -1,0 +1,4 @@
+/Users/h.shigeta/Documents/GitHub/StackChan-Orig/firmware/build-host-tests/CMakeFiles/motion_math_test.dir
+/Users/h.shigeta/Documents/GitHub/StackChan-Orig/firmware/build-host-tests/CMakeFiles/test.dir
+/Users/h.shigeta/Documents/GitHub/StackChan-Orig/firmware/build-host-tests/CMakeFiles/edit_cache.dir
+/Users/h.shigeta/Documents/GitHub/StackChan-Orig/firmware/build-host-tests/CMakeFiles/rebuild_cache.dir

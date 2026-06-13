@@ -184,6 +184,34 @@ def test_no_listen_stop_when_conversation_continues(
     assert frames is not None
 
 
+def test_downlink_lead_silence_prepended(
+    audio_ws_client_factory: Callable[..., TestClient],
+) -> None:
+    # The CoreS3 drops a fixed window at playback start; a lead-in of silence
+    # absorbs it so the opening syllable survives. The stream must start with
+    # >= the configured silence as all-zero PCM (RawPcm encoder = passthrough).
+    synth = _RecordingSynth(sample_count=4800, sample_rate=48000)  # 0.1 s @ 48k
+    client = audio_ws_client_factory(
+        gateway=_FakeAgent(AgentReply(text="げんき", emotion="happy")),
+        speech_synthesizer=synth,
+        audio_encoder=RawPcmAudioEncoder(),
+        settings_overrides={"downlink_lead_silence_ms": 300},
+    )
+    with _connect(client) as ws:
+        ws.send_json(_HELLO)
+        ws.receive_json()
+        ws.send_json({"type": "listen", "state": "detect", "text": "ねえ"})
+        ws.receive_json()  # stt
+        ws.receive_json()  # llm
+        ws.receive_json()  # tts.start
+        ws.receive_json()  # sentence_start
+        frames = _drain_to_stop(ws)
+    stream = b"".join(frames)
+    lead_bytes = (24000 * 300 // 1000) * 1 * 2  # 300 ms @ 24 kHz mono PCM16
+    assert len(stream) >= lead_bytes + 4800
+    assert stream[:lead_bytes] == b"\x00" * lead_bytes
+
+
 def test_emotion_maps_to_irodori_emoji_style(
     audio_ws_client_factory: Callable[..., TestClient],
 ) -> None:
