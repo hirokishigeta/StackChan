@@ -163,6 +163,9 @@ class BotAudioHandler:
 
     async def _handle_hello(self, ws: WebSocket, session: _Session, msg: dict[str, Any]) -> None:
         session.binary_version = int(msg.get("version", 0) or 0)
+        logger.info(
+            "hello: bin_ver=%d audio_params=%r", session.binary_version, msg.get("audio_params")
+        )
         params = msg.get("audio_params") or {}
         session.audio_format = AudioFormat(
             codec=str(params.get("format", "opus")),
@@ -418,14 +421,28 @@ class BotAudioHandler:
                 dst_rate=downlink.sample_rate,
             )
             payloads = self._encoder.encode(pcm=pcm, audio_format=downlink)
-        except (SpeechSynthesisError, AudioEncodeError, ValueError):
-            # Text-only fallback (#7-a behaviour). Connection stays alive.
+        except (SpeechSynthesisError, AudioEncodeError, ValueError) as exc:
+            # Text-only fallback (#7-a behaviour). Connection stays alive, but
+            # log loudly: a swallowed encode/synth error means silent playback.
+            logger.warning("TTS downlink skipped (text-only fallback): %s", exc)
             return
+        logger.info(
+            "TTS downlink: synth=%dB@%dHz -> resampled=%dB@%dHz -> %d opus frame(s), bin_ver=%d",
+            len(audio.pcm),
+            audio.sample_rate,
+            len(pcm),
+            downlink.sample_rate,
+            len(payloads),
+            session.binary_version,
+        )
+        sent = 0
         for payload in payloads:
             if session.aborted:
-                return
+                break
             frame = encode_frame(payload=payload, version=session.binary_version)
             await ws.send_bytes(frame)
+            sent += 1
+        logger.info("TTS downlink: sent %d/%d frame(s)", sent, len(payloads))
 
     def _resolve_profile(self, device_id: str) -> AgentProfile:
         settings = self._repository.get_settings(device_id)
