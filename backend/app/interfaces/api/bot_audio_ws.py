@@ -21,6 +21,7 @@ container; no business logic lives here (CLAUDE.md layer rules).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import struct
@@ -435,14 +436,30 @@ class BotAudioHandler:
             len(payloads),
             session.binary_version,
         )
+        # Pace the downlink at ~real time. Sending all frames in a tight loop
+        # floods the device's small jitter buffer, which then drops frames
+        # (choppy / cut-out audio). We prime a short burst to fill the buffer,
+        # then emit one frame per frame_duration so the device plays smoothly.
+        # Pacing also keeps `speaking` True for the real playback duration, so
+        # the half-duplex gate stays closed until the device actually finishes
+        # (otherwise the still-playing voice leaks back into the mic as echo).
+        frame_ms = downlink.frame_duration_ms or self._settings.downlink_frame_duration_ms
+        frame_s = max(frame_ms, 1) / 1000.0
+        prime = min(self._settings.downlink_prime_frames, len(payloads))
         sent = 0
-        for payload in payloads:
+        for idx, payload in enumerate(payloads):
             if session.aborted:
                 break
             frame = encode_frame(payload=payload, version=session.binary_version)
             await ws.send_bytes(frame)
             sent += 1
-        logger.info("TTS downlink: sent %d/%d frame(s)", sent, len(payloads))
+            if idx >= prime:
+                await asyncio.sleep(frame_s)
+        # Let the primed-but-not-yet-played frames drain on the device before the
+        # caller reopens the mic (keeps the echo gate closed through the tail).
+        if not session.aborted and prime:
+            await asyncio.sleep(prime * frame_s)
+        logger.info("TTS downlink: sent %d/%d frame(s) (paced)", sent, len(payloads))
 
     def _resolve_profile(self, device_id: str) -> AgentProfile:
         settings = self._repository.get_settings(device_id)

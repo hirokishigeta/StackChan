@@ -119,6 +119,11 @@ class AppSettings(BaseSettings):
     downlink_sample_rate: int = 24000
     downlink_channels: int = 1
     downlink_frame_duration_ms: int = 60
+    # Downlink TTS frames are paced at ~real time so the device's jitter buffer
+    # doesn't overflow (choppy audio). This many frames are sent up front to
+    # prime the buffer; the rest follow one per frame_duration. ~8 * 60ms =
+    # ~480ms of lead. Larger = more latency tolerance but later barge-in.
+    downlink_prime_frames: int = 8
 
     # Downlink audio encoder (PCM -> Opus), resolved via a registry. Default is
     # "raw" (PCM pass-through, framed) so the WS server runs without libopus;
