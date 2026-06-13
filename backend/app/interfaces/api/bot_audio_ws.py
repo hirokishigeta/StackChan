@@ -64,6 +64,7 @@ class _Session:
     audio_format: AudioFormat = AudioFormat()
     listening: bool = False
     aborted: bool = False
+    frames_rx: int = 0
     pcm_buffer: bytearray = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
@@ -153,10 +154,11 @@ class BotAudioHandler:
 
     async def _handle_listen(self, ws: WebSocket, session: _Session, msg: dict[str, Any]) -> None:
         state = str(msg.get("state"))
-        logger.info("listen state=%s text=%r", state, msg.get("text"))
+        logger.info("listen msg=%r", msg)
         if state == "start":
             session.listening = True
             session.aborted = False
+            session.frames_rx = 0
             session.pcm_buffer = bytearray()
         elif state == "stop":
             session.listening = False
@@ -205,9 +207,20 @@ class BotAudioHandler:
         try:
             payload = decode_frame(data=data, version=session.binary_version)
             pcm = self._decoder.decode(payload=payload, audio_format=session.audio_format)
-        except (AudioFrameError, AudioDecodeError):
+        except (AudioFrameError, AudioDecodeError) as exc:
             # Corrupt frame / missing codec: skip it, keep the session alive.
+            logger.warning(
+                "binary decode failed (v=%s,%dB): %s", session.binary_version, len(data), exc
+            )
             return
+        session.frames_rx += 1
+        if session.frames_rx == 1 or session.frames_rx % 25 == 0:
+            logger.info(
+                "audio frame #%d (+%dB pcm, buf=%dB)",
+                session.frames_rx,
+                len(pcm),
+                len(session.pcm_buffer) + len(pcm),
+            )
         session.pcm_buffer.extend(pcm)
 
     # -- turn handling ------------------------------------------------------
