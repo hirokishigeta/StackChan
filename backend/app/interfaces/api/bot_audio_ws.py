@@ -440,9 +440,16 @@ class BotAudioHandler:
                 src_rate=audio.sample_rate,
                 dst_rate=downlink.sample_rate,
             )
-            # No lead-in silence here: the head-clip is root-fixed on the device
-            # (firmware pre-enables the audio output on `tts.start` so the amp is
-            # warm before the first frame). The downlink is still paced below.
+            # Lead-in silence: serial-log ground truth shows the device drops a
+            # fixed window (~hundreds of ms) at the very start of playback (an
+            # I2S/codec startup transient), independent of the power-amp state —
+            # the synthesized audio itself is complete. Prepending silence makes
+            # that drop land on silence instead of the opening syllable. Tunable
+            # via STACKCHAN_DOWNLINK_LEAD_SILENCE_MS (per-device override below).
+            lead_ms = self._settings.downlink_lead_silence_ms
+            if lead_ms > 0:
+                lead_bytes = (downlink.sample_rate * lead_ms // 1000) * downlink.channels * 2
+                pcm = b"\x00" * lead_bytes + pcm
             payloads = self._encoder.encode(pcm=pcm, audio_format=downlink)
         except (SpeechSynthesisError, AudioEncodeError, ValueError) as exc:
             # Text-only fallback (#7-a behaviour). Connection stays alive, but

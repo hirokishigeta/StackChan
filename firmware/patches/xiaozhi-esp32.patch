@@ -274,10 +274,24 @@ index 3692e0c..7bfbc5c 100644
      // Strategy instance
      std::unique_ptr<AssetStrategy> strategy_;
 diff --git a/main/audio/audio_service.cc b/main/audio/audio_service.cc
-index 350ac58..e33665a 100644
+index 350ac58..22b454b 100644
 --- a/main/audio/audio_service.cc
 +++ b/main/audio/audio_service.cc
-@@ -679,6 +679,17 @@ void AudioService::ResetDecoder() {
+@@ -62,6 +62,13 @@ AudioService::~AudioService() {
+ void AudioService::Initialize(AudioCodec* codec) {
+     codec_ = codec;
+     codec_->Start();
++    // Keep the output codec/power-amp (AW88298) enabled from boot. The upstream
++    // behavior enables output lazily on the first decoded frame and powers it
++    // down after a timeout, so every TTS turn re-ramps the amp and clips the
++    // opening syllable. Like the original M5Stack StackChan (amp always on), we
++    // enable it once here and never auto-disable it (see CheckAndUpdateAudio-
++    // PowerState), so the amp is always warm and playback starts cleanly.
++    codec_->EnableOutput(true);
+ 
+     esp_opus_dec_cfg_t opus_dec_cfg = OPUS_DEC_CFG(codec->output_sample_rate(), OPUS_FRAME_DURATION_MS);
+     auto ret = esp_opus_dec_open(&opus_dec_cfg, sizeof(esp_opus_dec_cfg_t), &opus_decoder_);
+@@ -679,6 +686,17 @@ void AudioService::ResetDecoder() {
      audio_queue_cv_.notify_all();
  }
  
@@ -295,6 +309,27 @@ index 350ac58..e33665a 100644
  void AudioService::CheckAndUpdateAudioPowerState() {
      auto now = std::chrono::steady_clock::now();
      auto input_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_input_time_).count();
+@@ -686,15 +704,11 @@ void AudioService::CheckAndUpdateAudioPowerState() {
+     if (input_elapsed > AUDIO_POWER_TIMEOUT_MS && codec_->input_enabled()) {
+         codec_->EnableInput(false);
+     }
+-    if (output_elapsed > AUDIO_POWER_TIMEOUT_MS && codec_->output_enabled()) {
+-        // Keep TX clock when duplex RX is active; otherwise RX may stall on some boards.
+-        if (!(codec_->duplex() && codec_->input_enabled())) {
+-            codec_->EnableOutput(false);
+-        }
+-    }
+-    if (!codec_->input_enabled() && !codec_->output_enabled()) {
+-        esp_timer_stop(audio_power_timer_);
+-    }
++    // NOTE: the output codec/amp is intentionally NOT powered down on timeout.
++    // We keep it always-on (enabled at boot) so the AW88298 amp stays warm and
++    // TTS playback never re-ramps mid-utterance (which clipped the opening
++    // syllable). Power saving on output is traded for clean, gap-free playback.
++    (void)output_elapsed;
+ }
+ 
+ void AudioService::SetModelsList(srmodel_list_t* models_list) {
 diff --git a/main/audio/audio_service.h b/main/audio/audio_service.h
 index 99db546..fd1839d 100644
 --- a/main/audio/audio_service.h
