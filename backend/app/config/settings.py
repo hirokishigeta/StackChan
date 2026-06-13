@@ -106,6 +106,12 @@ class AppSettings(BaseSettings):
     vad_silence_ms: int = 800
     # Safety cap: force end-of-utterance once an utterance reaches this length.
     vad_max_utterance_ms: int = 15000
+    # Half-duplex: drop uplink audio while the bot is speaking (tts.start..stop).
+    # CoreS3 has no acoustic echo cancellation, so in auto mode the mic would
+    # otherwise pick up the bot's own TTS voice and re-trigger VAD (echo loop).
+    # Barge-in still works: the device sends an explicit `abort`/`listen` control
+    # (not gated here). Set False only on hardware with reliable AEC.
+    tts_half_duplex: bool = True
 
     # Downlink (server -> device) audio_params returned in the server hello.
     # These values are negotiated so firmware (#5) can rely on them; the
