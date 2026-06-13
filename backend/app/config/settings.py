@@ -143,6 +143,10 @@ class AppSettings(BaseSettings):
     # set "irodori" in deployment (ADR-0006). The WS loop falls back to a
     # text-only turn if synthesis is unavailable (design-spec §13).
     default_tts_provider: str = "dummy"
+    # Preload the TTS runtime at app startup (in a background thread, never
+    # blocking startup) so the first conversation turn doesn't pay the one-time
+    # model-load latency. No-op for lightweight engines (dummy).
+    tts_warm_up_on_startup: bool = True
 
     # Irodori-TTS (ADR-0006). Heavy deps (PyTorch / HF checkpoint) are optional
     # and lazy-loaded; paths/device come from here (no hard-coded paths,

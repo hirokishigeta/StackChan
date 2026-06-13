@@ -136,6 +136,17 @@ class IrodoriTtsSynthesizer(SpeechSynthesizer):
                 ) from exc
         return model_path
 
+    def warm_up(self) -> None:
+        """Preload the InferenceRuntime so the first turn pays no load latency.
+
+        Never raises (per the port contract): on failure the first
+        :meth:`synthesize` will retry the load and surface the error there.
+        """
+        try:
+            self._load_runtime()
+        except SpeechSynthesisError:
+            return
+
     def synthesize(self, *, text: str, emotion: str = "neutral") -> SynthesizedAudio:
         runtime = self._load_runtime()
         request_cls: Any = self._request_cls
