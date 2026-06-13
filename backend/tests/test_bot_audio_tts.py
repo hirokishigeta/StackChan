@@ -283,6 +283,32 @@ def test_half_duplex_drops_uplink_audio_while_speaking() -> None:
     assert len(session.pcm_buffer) > 0
 
 
+def test_irodori_warm_up_preloads_and_swallows_errors() -> None:
+    # warm_up must preload the runtime and never raise (port contract): a
+    # missing model path raises SpeechSynthesisError internally, swallowed here.
+    from app.config.settings import AppSettings
+    from app.infrastructure.tts.irodori_tts_synthesizer import IrodoriTtsSynthesizer
+
+    loaded = {"n": 0}
+
+    class _Synth(IrodoriTtsSynthesizer):
+        def _load_runtime(self) -> object:
+            loaded["n"] += 1
+            return object()
+
+    _Synth(AppSettings()).warm_up()
+    assert loaded["n"] == 1
+
+    # With no deps/model path the real load raises; warm_up must not propagate.
+    IrodoriTtsSynthesizer(AppSettings()).warm_up()  # no exception
+
+
+def test_default_synth_warm_up_is_noop() -> None:
+    from app.config.settings import AppSettings
+
+    DummySpeechSynthesizer(AppSettings()).warm_up()  # no-op, no exception
+
+
 def test_resample_48k_to_24k_halves_sample_count() -> None:
     pcm = b"\x01\x02" * 480  # 480 samples @ 48k
     out = resample_pcm16(pcm=pcm, src_rate=48000, dst_rate=24000)

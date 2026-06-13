@@ -43,3 +43,14 @@ class SpeechSynthesizer(ABC):
         failure instead of leaking engine-specific exceptions.
         """
         raise NotImplementedError
+
+    def warm_up(self) -> None:
+        """Eagerly load any heavy runtime so the first turn isn't slow.
+
+        Optional: the default is a no-op (lightweight engines need nothing).
+        Heavy engines (Irodori-TTS) override this to load the model ahead of the
+        first :meth:`synthesize`, so a user's first utterance doesn't pay the
+        one-time model-load latency (which can exceed the device reply timeout).
+        Must not raise: a failed warm-up just defers loading to the first call.
+        """
+        return None
