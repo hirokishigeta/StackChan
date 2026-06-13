@@ -243,6 +243,46 @@ def test_default_dummy_synth_produces_frames(
     assert frames  # at least one downlink audio frame
 
 
+def test_half_duplex_drops_uplink_audio_while_speaking() -> None:
+    # No device AEC: while the bot is speaking, uplink frames must be dropped so
+    # the bot's own TTS voice never reaches the decoder/VAD (echo loop).
+    import anyio
+    from app.application.ports.audio_decoder import AudioDecoder
+    from app.config.settings import AppSettings
+    from app.interfaces.api.bot_audio_ws import BotAudioHandler, _Session
+
+    class _RecordingDecoder(AudioDecoder):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def decode(self, *, payload: bytes, audio_format: AudioFormat) -> bytes:
+            self.calls += 1
+            return b"\x10\x00" * 320
+
+    decoder = _RecordingDecoder()
+    handler = BotAudioHandler(
+        settings=AppSettings(),
+        speech_recognizer=_FakeAsr(),
+        agent_gateway=_FakeAgent(AgentReply(text="x", emotion="neutral")),
+        audio_decoder=decoder,
+        speech_synthesizer=_RecordingSynth(),
+        audio_encoder=RawPcmAudioEncoder(),
+        repository=object(),  # type: ignore[arg-type]  # unused on this path
+    )
+    session = _Session(device_id="d", session_id="s", listening=True, listen_mode="auto")
+    frame = b"\x01\x00" * 320  # version 0 == raw PCM payload
+
+    session.speaking = True
+    anyio.run(handler._on_binary, None, session, frame)  # type: ignore[arg-type]
+    assert decoder.calls == 0  # gated: nothing decoded or buffered
+    assert len(session.pcm_buffer) == 0
+
+    session.speaking = False
+    anyio.run(handler._on_binary, None, session, frame)  # type: ignore[arg-type]
+    assert decoder.calls == 1  # mic re-opened: frame is decoded and buffered
+    assert len(session.pcm_buffer) > 0
+
+
 def test_resample_48k_to_24k_halves_sample_count() -> None:
     pcm = b"\x01\x02" * 480  # 480 samples @ 48k
     out = resample_pcm16(pcm=pcm, src_rate=48000, dst_rate=24000)

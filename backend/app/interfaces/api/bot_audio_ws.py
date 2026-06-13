@@ -92,6 +92,10 @@ class _Session:
     # xiaozhi listen mode of the current turn ("auto" | "manual" | "realtime").
     # Only "auto" relies on server-side VAD; "manual" finalizes on `listen stop`.
     listen_mode: str = "manual"
+    # True while a turn is being spoken (tts.start..stop). Used for half-duplex
+    # gating: uplink audio is dropped so the bot's own voice (no device AEC)
+    # does not re-trigger VAD into an echo loop.
+    speaking: bool = False
     vad: _VadState = field(default_factory=_VadState)
     pcm_buffer: bytearray = None  # type: ignore[assignment]
 
@@ -238,6 +242,12 @@ class BotAudioHandler:
     async def _on_binary(self, ws: WebSocket, session: _Session, data: bytes) -> None:
         if not session.listening or session.aborted:
             return
+        # Half-duplex: while the bot is speaking, drop uplink audio so its own
+        # TTS voice (CoreS3 has no AEC) does not feed VAD into an echo loop, and
+        # a new turn cannot start re-entrantly mid-reply. Barge-in still arrives
+        # as an `abort`/`listen` control (text), which is not gated here.
+        if session.speaking and self._settings.tts_half_duplex:
+            return
         try:
             payload = decode_frame(data=data, version=session.binary_version)
             pcm = self._decoder.decode(payload=payload, audio_format=session.audio_format)
@@ -329,6 +339,9 @@ class BotAudioHandler:
     async def _finalize_turn(self, ws: WebSocket, session: _Session) -> None:
         if session.aborted:
             return
+        # Drop a finalize that races a turn already in flight (half-duplex).
+        if session.speaking:
+            return
         audio = bytes(session.pcm_buffer)
         session.pcm_buffer = bytearray()
         logger.info("finalize: pcm=%d bytes", len(audio))
@@ -365,13 +378,23 @@ class BotAudioHandler:
             return
         # Emotion -> expression (xiaozhi `llm`, §2.2 -> firmware SetEmotion).
         await ws.send_json({"type": "llm", "emotion": reply.emotion})
-        # tts.start -> (downlink Opus audio frames) -> sentence_start text ->
-        # tts.stop. The audio frames are #7-b; the JSON sequence is unchanged
-        # from #7-a so the device's existing path keeps working.
-        await ws.send_json({"type": "tts", "state": "start"})
-        await ws.send_json({"type": "tts", "state": "sentence_start", "text": reply.text})
-        await self._send_tts_audio(ws, session, reply)
-        await ws.send_json({"type": "tts", "state": "stop"})
+        # Half-duplex: mark speaking across the whole tts.start..stop window so
+        # the bot's own voice (no device AEC) is not heard back as input. On exit
+        # reset VAD/buffer so the in-flight tail (captured just before the gate
+        # closed) cannot immediately re-finalize once we re-open the mic.
+        session.speaking = True
+        try:
+            # tts.start -> (downlink Opus audio frames) -> sentence_start text ->
+            # tts.stop. The audio frames are #7-b; the JSON sequence is unchanged
+            # from #7-a so the device's existing path keeps working.
+            await ws.send_json({"type": "tts", "state": "start"})
+            await ws.send_json({"type": "tts", "state": "sentence_start", "text": reply.text})
+            await self._send_tts_audio(ws, session, reply)
+            await ws.send_json({"type": "tts", "state": "stop"})
+        finally:
+            session.speaking = False
+            session.vad.reset()
+            session.pcm_buffer = bytearray()
 
     async def _send_tts_audio(self, ws: WebSocket, session: _Session, reply: AgentReply) -> None:
         """Synthesize the reply and send downlink Opus frames (#7-b).
