@@ -433,8 +433,18 @@ class BotAudioHandler:
             channels=self._settings.downlink_channels,
             frame_duration_ms=self._settings.downlink_frame_duration_ms,
         )
+        loop = asyncio.get_running_loop()
+        t_synth0 = loop.time()
         try:
             audio = self._synthesizer.synthesize(text=reply.text, emotion=reply.emotion)
+            synth_ms = (loop.time() - t_synth0) * 1000.0
+            audio_ms = (len(audio.pcm) / 2) / max(audio.sample_rate, 1) * 1000.0
+            logger.info(
+                "TTS timing: synth=%.0fms for %.0fms audio (RTF=%.2f)",
+                synth_ms,
+                audio_ms,
+                synth_ms / max(audio_ms, 1),
+            )
             pcm = resample_pcm16(
                 pcm=audio.pcm,
                 src_rate=audio.sample_rate,
