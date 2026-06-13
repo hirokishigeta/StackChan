@@ -135,9 +135,15 @@ class AppSettings(BaseSettings):
     # sound after entering the speaking state (confirmed via serial log + on-
     # device A/B: 800ms still clipped, 1200ms played the opening cleanly; the
     # synthesized audio itself is complete and amp/firmware warm-up did not help).
-    # This silence absorbs that drop instead of the opening syllable. Tune per
-    # deployment (trade latency vs safety); 0 disables.
+    # This silence absorbs that drop instead of the opening syllable. With the
+    # synth-bridge (see _send_tts_audio) this is the *minimum* bridge silence:
+    # the device plays silence for max(synth_time, this) before the real audio,
+    # so the synth-wait and the start-drop overlap rather than stacking. Tune per
+    # deployment (trade latency vs safety).
     downlink_lead_silence_ms: int = 1200
+    # Safety cap on the silence bridge so a hung/slow synth can't stream silence
+    # forever before falling back to text-only.
+    tts_max_bridge_ms: int = 6000
 
     # Downlink audio encoder (PCM -> Opus), resolved via a registry. Default is
     # "raw" (PCM pass-through, framed) so the WS server runs without libopus;
