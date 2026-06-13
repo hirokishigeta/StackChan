@@ -77,11 +77,9 @@ def _make_container(
     db_path = f"{tmp_path}/test.db"  # type: ignore[str-bytes-safe]
     # Tests must be hermetic: ignore any developer-local backend/.env so settings
     # fall back to code defaults (dummy providers). Otherwise a local .env that
-    # selects e.g. sherpa-onnx would break provider-default tests.
-    # Default lead-in silence to 0 so protocol/framing tests aren't perturbed by
-    # the (real) downlink lead-in; tests that exercise it opt in via overrides.
-    overrides: dict[str, object] = {"downlink_lead_silence_ms": 0}
-    overrides.update(settings_overrides or {})
+    # selects e.g. sherpa-onnx would break provider-default tests. Tests that
+    # need specific settings pass them via settings_overrides.
+    overrides: dict[str, object] = dict(settings_overrides or {})
     test_settings = AppSettings(_env_file=None, database_url=f"sqlite:///{db_path}", **overrides)
     container = container_module.Container(test_settings)
     if gateway is not None:

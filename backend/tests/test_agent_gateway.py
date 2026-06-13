@@ -69,6 +69,22 @@ async def test_maps_structured_json_reply() -> None:
     assert reply.emotion == "happy"
     assert reply.actions[0].type == "set_expression"
     assert reply.actions[0].value == "happy"
+    assert reply.end_conversation is False  # absent -> default False
+
+
+@pytest.mark.anyio
+async def test_maps_end_conversation_flag() -> None:
+    structured = json.dumps(
+        {"text": "またね！", "emotion": "happy", "actions": [], "end_conversation": True}
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_completion_body(structured))
+
+    gateway = _gateway_with_handler(handler)
+    reply = await gateway.chat(message="bye", profile=AgentProfile())
+
+    assert reply.end_conversation is True
 
 
 @pytest.mark.anyio
