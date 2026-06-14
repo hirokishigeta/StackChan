@@ -79,9 +79,10 @@ def _make_container(
     # fall back to code defaults (dummy providers). Otherwise a local .env that
     # selects e.g. sherpa-onnx would break provider-default tests. Tests that
     # need specific settings pass them via settings_overrides.
-    # Pin lead-in silence to 0 so protocol/framing tests aren't perturbed by the
-    # (real) downlink lead-in; tests that exercise it opt in via overrides.
-    overrides: dict[str, object] = {"downlink_lead_silence_ms": 0}
+    # Pin lead-in silence and the post-roll gate to 0 so protocol/framing tests
+    # aren't perturbed or slowed by the (real) downlink bridge/cooldown; tests
+    # that exercise them opt in via overrides.
+    overrides: dict[str, object] = {"downlink_lead_silence_ms": 0, "tts_postroll_gate_ms": 0}
     overrides.update(settings_overrides or {})
     test_settings = AppSettings(_env_file=None, database_url=f"sqlite:///{db_path}", **overrides)
     container = container_module.Container(test_settings)
