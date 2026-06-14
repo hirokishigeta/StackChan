@@ -26,6 +26,21 @@ from .schemas import (
 router = APIRouter(prefix="/api/vision", tags=["vision"])
 
 
+def _debug_save_frame(image: bytes) -> None:
+    """Diagnostics: write the received frame to vision_debug_save_path if set."""
+    from app.config.settings import get_settings
+
+    path = get_settings().vision_debug_save_path
+    if not path or not image:
+        return
+    try:
+        from pathlib import Path
+
+        Path(path).write_bytes(image)
+    except OSError:
+        pass
+
+
 def _detection_schemas(detections: object) -> list[DetectionSchema]:
     # ``detections`` is a tuple[Detection, ...]; typed loosely to avoid importing
     # the domain VO here (kept thin per CLAUDE.md interfaces rule).
@@ -55,6 +70,7 @@ async def detect(
 ) -> VisionDetectResponse:
     """Run detection on a raw image body (image/jpeg | image/raw) — §11.4."""
     image = await request.body()
+    _debug_save_frame(image)
     result = await use_case.execute(image=image, device_id=device_id)
     return VisionDetectResponse(
         detections=_detection_schemas(result.detections),
