@@ -9,6 +9,7 @@ from __future__ import annotations
 from app.application.ports.settings_repository import SettingsRepository
 from app.application.ports.voice_sample_repository import VoiceSampleRepository
 from app.application.use_cases.detect_attention import DetectAttentionUseCase
+from app.application.use_cases.generate_voice_sample import GenerateVoiceSampleUseCase
 from app.application.use_cases.manage_server_settings import ManageServerSettingsUseCase
 from app.application.use_cases.manage_settings import ManageSettingsUseCase
 from app.application.use_cases.process_agent_request import ProcessAgentRequestUseCase
@@ -64,6 +65,13 @@ def get_server_settings_use_case() -> ManageServerSettingsUseCase:
 
 def get_voice_sample_repository() -> VoiceSampleRepository:
     return get_container().voice_sample_repository
+
+
+def get_generate_voice_sample_use_case() -> GenerateVoiceSampleUseCase:
+    container = get_container()
+    return GenerateVoiceSampleUseCase(
+        container.speech_synthesizer, container.voice_sample_repository
+    )
 
 
 def get_event_publisher() -> InMemoryBotEventPublisher:

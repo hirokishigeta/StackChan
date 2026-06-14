@@ -184,6 +184,12 @@
       .vs-item input[type="radio"] { width: 18px; height: 18px; accent-color: var(--c, var(--accent)); flex: none; }
       .vs-item label { margin: 0; flex: 1; cursor: pointer; }
       .vs-play { flex: none; }
+      .vs-gen {
+        background: var(--panel2); border: 1px solid var(--border); border-radius: 10px;
+        padding: 14px 16px; margin-top: 4px;
+      }
+      .vs-gen-title { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+      .vs-gen .field { margin-bottom: 10px; }
 
       /* ---- sticky save bar ---- */
       footer.savebar {
@@ -496,6 +502,33 @@
                   <label>声サンプル (リファレンス音声でクローン)</label>
                   <p class="hint">あらかじめ生成された音声サンプルから 1 つ選ぶと、その声色を固定してクローンします。▶ で試聴できます。未選択なら caption / 既定のリファレンスを使用します。</p>
                   <div id="voice-sample-list" class="vs-list"></div>
+                </div>
+                <div class="field full">
+                  <div class="vs-gen">
+                    <h3 class="vs-gen-title">声サンプルを生成 (ref生成)</h3>
+                    <p class="hint">caption と例文から GPU で新しいリファレンス音声を生成し、上の一覧に追加します。生成には数秒かかります。</p>
+                    <div class="field">
+                      <label for="voice-gen-id">サンプル ID (スラッグ)</label>
+                      <p class="hint">半角英数字とハイフン / アンダースコアのみ。ファイル名になります（例: cute-girl-01）。</p>
+                      <input type="text" id="voice-gen-id" placeholder="cute-girl-01" />
+                    </div>
+                    <div class="field">
+                      <label for="voice-gen-label">表示名 (ラベル)</label>
+                      <p class="hint">一覧に表示される名前。空欄なら ID をそのまま使います。</p>
+                      <input type="text" id="voice-gen-label" placeholder="（空で ID を使用）" />
+                    </div>
+                    <div class="field full">
+                      <label for="voice-gen-caption">声の指示 (caption)</label>
+                      <p class="hint">生成する声色を言葉で指定します（VoiceDesign）。</p>
+                      <textarea id="voice-gen-caption" placeholder="明るく親しみやすい少女の声…">明るいが静かめの少女の声。少し高めで、親しみやすく、楽しそうに話してください。</textarea>
+                    </div>
+                    <div class="field full">
+                      <label for="voice-gen-text">例文</label>
+                      <p class="hint">この文をその声で読み上げてサンプルにします。</p>
+                      <textarea id="voice-gen-text">こんにちは、今日はどんなお話をしましょうか？</textarea>
+                    </div>
+                    <button type="button" id="voice-gen-btn" class="primary" style="--c: var(--c-voice)">生成</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -874,6 +907,45 @@
         renderVoiceSamples();
       }
 
+      async function generateVoiceSample() {
+        const btn = $("voice-gen-btn");
+        const id = getVal("voice-gen-id").trim();
+        const caption = getVal("voice-gen-caption").trim();
+        const text = getVal("voice-gen-text").trim();
+        const label = getVal("voice-gen-label").trim();
+        if (!id) return toast("サンプル ID を入力してください", false);
+        if (!caption) return toast("声の指示 (caption) を入力してください", false);
+        const original = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "生成中…";
+        toast("音声を生成しています（数秒かかります）…", true);
+        try {
+          const resp = await fetch("/api/voice-samples", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id, label: label || null, caption, text: text || undefined }),
+          });
+          if (!resp.ok) {
+            const detail = await resp.json().catch(() => ({}));
+            throw new Error(
+              (detail && detail.detail ? JSON.stringify(detail.detail) : "") || `HTTP ${resp.status}`
+            );
+          }
+          const created = await resp.json();
+          await loadVoiceSamples();
+          selectedSampleId = created.id;
+          renderVoiceSamples();
+          $("voice-gen-id").value = "";
+          $("voice-gen-label").value = "";
+          toast(`声サンプル「${created.label}」を生成しました`, true);
+        } catch (e) {
+          toast("生成失敗: " + e.message, false);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = original;
+        }
+      }
+
       async function loadVoice() {
         try {
           const resp = await fetch("/api/server-settings");
@@ -947,6 +1019,7 @@
       $("load-btn").addEventListener("click", loadDevice);
       $("device-form").addEventListener("submit", saveDevice);
       $("voice-form").addEventListener("submit", saveVoice);
+      $("voice-gen-btn").addEventListener("click", generateVoiceSample);
 
       initTheme();
       initTabs();

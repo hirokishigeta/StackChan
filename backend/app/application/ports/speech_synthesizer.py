@@ -44,6 +44,24 @@ class SpeechSynthesizer(ABC):
         """
         raise NotImplementedError
 
+    def generate_reference(
+        self, *, text: str, caption: str, seed: int | None = None
+    ) -> SynthesizedAudio:
+        """Mint a fresh reference voice from a natural-language ``caption``.
+
+        Unlike :meth:`synthesize` (the production path, which *clones* a selected
+        reference with no caption), this runs the engine with no reference wav and
+        an explicit VoiceDesign caption to *create* a brand-new voice, then returns
+        the clean PCM so the caller can persist it as a new selectable sample
+        (ADR-0013). ``seed`` pins the speaker timbre (engines default to their
+        configured seed when ``None``).
+
+        Only caption-capable engines (Irodori-TTS) support this; the default
+        raises :class:`SpeechSynthesisError` so lightweight engines / fakes need
+        not implement it (this is intentionally *not* an ``@abstractmethod``).
+        """
+        raise SpeechSynthesisError("reference generation not supported")
+
     def warm_up(self) -> None:
         """Eagerly load any heavy runtime so the first turn isn't slow.
 
