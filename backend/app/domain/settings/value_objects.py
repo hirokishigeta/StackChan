@@ -33,3 +33,23 @@ class ServerVoiceSettings:
     # is fixed (ADR-0012). ``None`` means no sample is selected: the synthesizer
     # falls back to ``irodori_reference_wav_path`` else no_ref.
     voice_sample_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ServerHermesSettings:
+    """Server-global, runtime-mutable Hermes connection configuration.
+
+    Like :class:`ServerVoiceSettings`, these are *not* per-device: they describe
+    the single HermesAgent endpoint the backend talks to. The effective value is
+    the persisted dashboard override layered onto the ``AppSettings`` / env
+    defaults (see ``ManageServerSettingsUseCase``), so a dashboard change takes
+    effect without an env edit / restart.
+
+    The Hermes API key is intentionally *not* stored here: it stays env-only
+    (``AppSettings.hermes_api_key``) so a secret is never exposed through the
+    dashboard API or persisted to SQLite.
+    """
+
+    base_url: str = ""
+    model: str = ""
+    dashboard_url: str = ""

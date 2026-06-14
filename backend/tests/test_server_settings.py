@@ -268,6 +268,36 @@ def test_put_unknown_sample_is_422(client: TestClient) -> None:
     assert resp.status_code == 422
 
 
+def test_get_hermes_settings_default_fallback(client: TestClient) -> None:
+    """With no persisted override, GET returns the AppSettings/env Hermes defaults."""
+    defaults = AppSettings(_env_file=None)
+    resp = client.get("/api/server-settings/hermes")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["base_url"] == defaults.hermes_base_url
+    assert body["model"] == defaults.hermes_model
+    assert body["dashboard_url"] == defaults.hermes_dashboard_url
+    # The API key must never be exposed.
+    assert "api_key" not in body
+
+
+def test_put_then_get_hermes_round_trip(client: TestClient) -> None:
+    """PUT persists the Hermes override; a subsequent GET returns it unchanged."""
+    payload = {
+        "base_url": "http://10.0.0.5:9000/v1",
+        "model": "hermes-3",
+        "dashboard_url": "http://10.0.0.5:9000/ui",
+    }
+    put = client.put("/api/server-settings/hermes", json=payload)
+    assert put.status_code == 200
+    assert put.json() == payload
+    assert "api_key" not in put.json()
+
+    got = client.get("/api/server-settings/hermes")
+    assert got.status_code == 200
+    assert got.json() == payload
+
+
 def test_dashboard_serves_html(client: TestClient) -> None:
     resp = client.get("/dashboard")
     assert resp.status_code == 200

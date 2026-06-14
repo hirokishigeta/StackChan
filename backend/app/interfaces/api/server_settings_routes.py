@@ -18,7 +18,7 @@ from app.application.use_cases.manage_server_settings import (
     UnknownVoiceSampleError,
 )
 from app.di_container.dependencies import get_server_settings_use_case
-from app.domain.settings.value_objects import ServerVoiceSettings
+from app.domain.settings.value_objects import ServerHermesSettings, ServerVoiceSettings
 
 router = APIRouter(prefix="/api/server-settings", tags=["server-settings"])
 
@@ -101,3 +101,55 @@ def update_server_settings(
             detail=f"voice_sample_id: {body.voice_sample_id!r} (unknown sample)",
         ) from exc
     return ServerVoiceSettingsSchema.from_domain(updated)
+
+
+class ServerHermesSettingsSchema(BaseModel):
+    """HTTP representation of the server-global Hermes connection settings.
+
+    The Hermes API key is intentionally absent: it stays env-only and is never
+    exposed through this API.
+    """
+
+    base_url: str = Field(description="HermesAgent OpenAI-compatible base URL")
+    model: str = Field(description="HermesAgent model id")
+    dashboard_url: str = Field(description="URL for the dashboard's 'Open Hermes Dashboard' link")
+
+    @classmethod
+    def from_domain(cls, hermes: ServerHermesSettings) -> ServerHermesSettingsSchema:
+        return cls(
+            base_url=hermes.base_url,
+            model=hermes.model,
+            dashboard_url=hermes.dashboard_url,
+        )
+
+
+class ServerHermesSettingsUpdate(BaseModel):
+    """Request body for updating the Hermes connection settings (all required)."""
+
+    base_url: str
+    model: str
+    dashboard_url: str
+
+
+@router.get("/hermes")
+def get_server_hermes_settings(
+    use_case: Annotated[ManageServerSettingsUseCase, Depends(get_server_settings_use_case)],
+) -> ServerHermesSettingsSchema:
+    """Return the effective Hermes connection settings (override over env defaults)."""
+    return ServerHermesSettingsSchema.from_domain(use_case.current_hermes())
+
+
+@router.put("/hermes")
+def update_server_hermes_settings(
+    body: ServerHermesSettingsUpdate,
+    use_case: Annotated[ManageServerSettingsUseCase, Depends(get_server_settings_use_case)],
+) -> ServerHermesSettingsSchema:
+    """Persist the Hermes connection override and return the new effective value."""
+    updated = use_case.update_hermes(
+        ServerHermesSettings(
+            base_url=body.base_url,
+            model=body.model,
+            dashboard_url=body.dashboard_url,
+        )
+    )
+    return ServerHermesSettingsSchema.from_domain(updated)

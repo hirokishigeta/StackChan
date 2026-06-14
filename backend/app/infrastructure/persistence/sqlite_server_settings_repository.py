@@ -12,10 +12,12 @@ import json
 from sqlmodel import Field, Session, SQLModel, create_engine
 
 from app.application.ports.server_settings_repository import ServerSettingsRepository
-from app.domain.settings.value_objects import ServerVoiceSettings
+from app.domain.settings.value_objects import ServerHermesSettings, ServerVoiceSettings
 
 # Fixed primary key: there is exactly one server-global voice override row.
 _VOICE_ROW_ID = "voice"
+# Fixed primary key: there is exactly one server-global Hermes override row.
+_HERMES_ROW_ID = "hermes"
 
 
 class ServerVoiceRow(SQLModel, table=True):
@@ -25,6 +27,15 @@ class ServerVoiceRow(SQLModel, table=True):
 
     id: str = Field(default=_VOICE_ROW_ID, primary_key=True)
     payload: str  # JSON-encoded ServerVoiceSettings
+
+
+class ServerHermesRow(SQLModel, table=True):
+    """Persistence row holding the server Hermes connection override as JSON."""
+
+    __tablename__ = "server_hermes_settings"
+
+    id: str = Field(default=_HERMES_ROW_ID, primary_key=True)
+    payload: str  # JSON-encoded ServerHermesSettings
 
 
 class SqliteServerSettingsRepository(ServerSettingsRepository):
@@ -63,6 +74,37 @@ class SqliteServerSettingsRepository(ServerSettingsRepository):
             row = session.get(ServerVoiceRow, _VOICE_ROW_ID)
             if row is None:
                 row = ServerVoiceRow(id=_VOICE_ROW_ID, payload=payload)
+            else:
+                row.payload = payload
+            session.add(row)
+            session.commit()
+
+    def get_hermes_override(self) -> ServerHermesSettings | None:
+        with Session(self._engine) as session:
+            row = session.get(ServerHermesRow, _HERMES_ROW_ID)
+            if row is None:
+                return None
+            data = json.loads(row.payload)
+            return ServerHermesSettings(
+                # Back-compat: tolerate rows missing any key.
+                base_url=data.get("base_url", ""),
+                model=data.get("model", ""),
+                dashboard_url=data.get("dashboard_url", ""),
+            )
+
+    def save_hermes_override(self, hermes: ServerHermesSettings) -> None:
+        payload = json.dumps(
+            {
+                "base_url": hermes.base_url,
+                "model": hermes.model,
+                "dashboard_url": hermes.dashboard_url,
+            },
+            ensure_ascii=False,
+        )
+        with Session(self._engine) as session:
+            row = session.get(ServerHermesRow, _HERMES_ROW_ID)
+            if row is None:
+                row = ServerHermesRow(id=_HERMES_ROW_ID, payload=payload)
             else:
                 row.payload = payload
             session.add(row)
