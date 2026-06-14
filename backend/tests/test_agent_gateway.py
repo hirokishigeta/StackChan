@@ -254,3 +254,48 @@ def test_chat_route_falls_back_on_agent_error(
     body = resp.json()
     assert body["text"]
     assert body["actions"][0]["type"] == "set_expression"
+
+
+@pytest.mark.anyio
+async def test_hermes_delegates_persona_and_model_to_hermes() -> None:
+    """HermesAgent owns persona/model: our per-device system_prompt and
+    model_name must NOT be sent; the configured Hermes model is used."""
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        assert request.url.path.endswith("/chat/completions")
+        return httpx.Response(
+            200,
+            json=_completion_body(
+                json.dumps(
+                    {
+                        "text": "ふむ",
+                        "emotion": "neutral",
+                        "actions": [],
+                        "end_conversation": False,
+                    }
+                )
+            ),
+        )
+
+    transport = httpx.MockTransport(handler)
+
+    def factory() -> httpx.AsyncClient:
+        return httpx.AsyncClient(base_url="http://hermes/v1", transport=transport)
+
+    gw = HermesAgentGateway(
+        base_url="http://hermes/v1",
+        api_key="hk",
+        model="hermes-agent",
+        client_factory=factory,
+    )
+    profile = AgentProfile(model_name="gpt-5-chat-latest", system_prompt="SECRET PERSONA")
+    reply = await gw.chat(message="hi", profile=profile)
+
+    assert reply.text == "ふむ"
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert payload["model"] == "hermes-agent"  # Hermes model, not the profile's
+    system_contents = [m["content"] for m in payload["messages"] if m["role"] == "system"]
+    assert all("SECRET PERSONA" not in c for c in system_contents)  # persona delegated

@@ -31,7 +31,12 @@ def _build_openai_compatible(settings: AppSettings) -> AgentGateway:
 
 
 def _build_hermes(settings: AppSettings) -> AgentGateway:
-    return HermesAgentGateway()
+    return HermesAgentGateway(
+        base_url=settings.hermes_base_url,
+        api_key=settings.hermes_api_key,
+        model=settings.hermes_model,
+        timeout_s=settings.agent_request_timeout_s,
+    )
 
 
 def _build_openclaw(settings: AppSettings) -> AgentGateway:

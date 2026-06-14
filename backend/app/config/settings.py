@@ -72,6 +72,19 @@ class AppSettings(BaseSettings):
     # and the API returns a safe fallback so the conversation loop survives.
     agent_request_timeout_s: float = 30.0
 
+    # HermesAgent (NousResearch hermes-agent) — OpenAI-compatible API server
+    # (default 127.0.0.1:8642, base path /v1, bearer API_SERVER_KEY). When the
+    # HermesAgent provider is selected, agent settings (persona / model / memory
+    # / skills) are owned by Hermes, so we do NOT send our per-device
+    # system_prompt or model_name; only the connection params below are used.
+    # hermes_dashboard_url is the URL the dashboard's "Open Hermes Dashboard"
+    # button opens (Hermes ships no web UI of its own — point this at a Hermes
+    # client UI such as Open WebUI, or leave empty to disable the button).
+    hermes_base_url: str = "http://127.0.0.1:8642/v1"
+    hermes_api_key: str = ""
+    hermes_model: str = "hermes-agent"
+    hermes_dashboard_url: str = ""
+
     # Speech (ASR) provider, resolved via a registry in di_container. Default
     # is "dummy" so the process / make check run without native deps or models;
     # set "sherpa-onnx" in deployment (CLAUDE.md: registry, not if-branching).
