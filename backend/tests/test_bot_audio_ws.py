@@ -631,3 +631,47 @@ def test_real_followup_after_reply_still_reaches_agent(
                 if msg.get("type") == "tts" and msg.get("state") == "stop":
                     break
     assert agent.messages == ["明日の天気は", "ありがとう、助かったよ"]
+
+
+def _drive_turn(ws: object, frame: bytes) -> list[dict]:
+    """Drive one manual turn; return the JSON messages received until tts.stop."""
+    ws.send_json({"type": "listen", "state": "start", "mode": "manual"})  # type: ignore[attr-defined]
+    ws.send_bytes(frame)  # type: ignore[attr-defined]
+    ws.send_json({"type": "listen", "state": "stop"})  # type: ignore[attr-defined]
+    msgs: list[dict] = []
+    while True:
+        m = ws.receive_json()  # type: ignore[attr-defined]
+        msgs.append(m)
+        if m.get("type") == "tts" and m.get("state") == "stop":
+            return msgs
+
+
+def test_multiturn_conversation_stays_clean_with_interspersed_echo(
+    audio_ws_client_factory: Callable[..., TestClient],
+) -> None:
+    """5 turns alternating real question / echo-of-reply: only the real turns
+    reach the agent, echoes are dropped, and the session stays healthy
+    throughout (regression for 'conversation degrades after a few turns')."""
+    reply_text = "今日はとても良い天気ですね"
+    reals = ["明日の天気は", "おすすめの本ある", "ありがとう助かった"]
+    # Turn order: real, echo, real, echo, real
+    asr = _SequenceAsr([reals[0], reply_text, reals[1], reply_text, reals[2]])
+    agent = _FakeAgent(AgentReply(text=reply_text, emotion="neutral"))
+    client = audio_ws_client_factory(
+        gateway=agent,
+        speech_recognizer=asr,
+        audio_decoder=_FakeDecoder(),
+        speech_synthesizer=_SilentSynth(),
+    )
+    with _connect(client) as ws:
+        ws.send_json(_HELLO)
+        ws.receive_json()
+        # real turn -> stt + reply stream ending in tts.stop
+        assert any(m.get("type") == "stt" for m in _drive_turn(ws, b"\x11" * 320))
+        # echo turn -> dropped: just a tts.stop, no stt
+        assert _drive_turn(ws, b"\x22" * 320) == [{"type": "tts", "state": "stop"}]
+        assert any(m.get("type") == "stt" for m in _drive_turn(ws, b"\x33" * 320))
+        assert _drive_turn(ws, b"\x44" * 320) == [{"type": "tts", "state": "stop"}]
+        assert any(m.get("type") == "stt" for m in _drive_turn(ws, b"\x55" * 320))
+    # Only the three real utterances reached the agent; echoes were dropped.
+    assert agent.messages == reals
