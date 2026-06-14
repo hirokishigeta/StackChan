@@ -470,6 +470,12 @@
               <div id="ww-rows"></div>
               <div><button type="button" id="ww-add-btn" class="secondary">＋ ワードを追加</button></div>
             </div>
+            <div class="group">
+              <h3>会話終了ワード</h3>
+              <p class="hint">会話中にこのフレーズが含まれると会話を終了し、ウェイクワード待ちに戻ります（バックエンド側で発話テキストを照合）。未登録の場合はサーバー共通の既定リストが使われます。</p>
+              <div id="ew-rows"></div>
+              <div><button type="button" id="ew-add-btn" class="secondary">＋ 終了ワードを追加</button></div>
+            </div>
           </section>
         </form>
 
@@ -677,6 +683,9 @@
         setVal("wake_word-detection_method", ww.detection_method || "local");
         setVal("wake_word-max_local_active", ww.max_local_active);
         renderWakeWordRows(Array.isArray(ww.wake_words) ? ww.wake_words : []);
+
+        const ew = s.end_word || {};
+        renderEndWordRows(Array.isArray(ew.end_words) ? ew.end_words : []);
       }
 
       // ---- wake words (dynamic rows) ----
@@ -769,6 +778,77 @@
         return out;
       }
 
+      // ---- end words (dynamic rows) ----
+      let ewSeq = 0;
+      function endWordRowTemplate(w) {
+        const idx = ewSeq++;
+        const id = (w && w.id) || `ew-${Date.now()}-${idx}`;
+        const phrase = (w && w.phrase) || "";
+        const enabled = w ? Boolean(w.enabled) : true;
+        const row = document.createElement("div");
+        row.className = "ww-row";
+        row.dataset.ewId = id;
+        const phraseField = document.createElement("div");
+        phraseField.className = "field";
+        phraseField.innerHTML =
+          '<label>フレーズ</label><p class="hint">会話を終了する言葉。空欄は保存できません。</p>';
+        const phraseInput = document.createElement("input");
+        phraseInput.type = "text";
+        phraseInput.className = "ew-phrase";
+        phraseInput.placeholder = "ばいばい";
+        phraseInput.value = phrase;
+        phraseField.appendChild(phraseInput);
+        const checkWrap = document.createElement("div");
+        checkWrap.className = "check";
+        const checkInput = document.createElement("input");
+        checkInput.type = "checkbox";
+        checkInput.className = "ew-enabled";
+        checkInput.checked = enabled;
+        const ctext = document.createElement("div");
+        ctext.className = "ctext";
+        ctext.innerHTML = "<label>有効</label>";
+        checkWrap.appendChild(checkInput);
+        checkWrap.appendChild(ctext);
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "secondary";
+        removeBtn.textContent = "削除";
+        removeBtn.addEventListener("click", () => {
+          row.remove();
+          if (!$("ew-rows").querySelector(".ww-row")) renderEndWordRows([]);
+        });
+        row.appendChild(phraseField);
+        row.appendChild(checkWrap);
+        row.appendChild(removeBtn);
+        return row;
+      }
+      function renderEndWordRows(words) {
+        const host = $("ew-rows");
+        host.innerHTML = "";
+        if (!words.length) {
+          const empty = document.createElement("p");
+          empty.className = "ww-empty";
+          empty.textContent = "登録された会話終了ワードはありません。未登録の場合はサーバー共通の既定リストが使われます。";
+          host.appendChild(empty);
+          return;
+        }
+        for (const w of words) host.appendChild(endWordRowTemplate(w));
+      }
+      function collectEndWords() {
+        const rows = $("ew-rows").querySelectorAll(".ww-row");
+        const out = [];
+        rows.forEach((row) => {
+          const phrase = row.querySelector(".ew-phrase").value.trim();
+          if (!phrase) return; // skip blank rows; backend would 422 on empty
+          out.push({
+            id: row.dataset.ewId,
+            phrase,
+            enabled: row.querySelector(".ew-enabled").checked,
+          });
+        });
+        return out;
+      }
+
       function collectDeviceForm() {
         return {
           agent: {
@@ -811,6 +891,9 @@
             detection_method: getVal("wake_word-detection_method"),
             max_local_active: getNum("wake_word-max_local_active"),
             wake_words: collectWakeWords(),
+          },
+          end_word: {
+            end_words: collectEndWords(),
           },
         };
       }
@@ -1014,6 +1097,12 @@
         const empty = host.querySelector(".ww-empty");
         if (empty) empty.remove();
         host.appendChild(wakeWordRowTemplate(null));
+      });
+      $("ew-add-btn").addEventListener("click", () => {
+        const host = $("ew-rows");
+        const empty = host.querySelector(".ww-empty");
+        if (empty) empty.remove();
+        host.appendChild(endWordRowTemplate(null));
       });
 
       $("load-btn").addEventListener("click", loadDevice);

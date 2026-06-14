@@ -25,8 +25,8 @@ from app.domain.vision.entities import (
     VisionStreamPolicy,
 )
 from app.domain.vision.value_objects import ProcessingLocation
-from app.domain.wakeword.entities import WakeWordConfig
-from app.domain.wakeword.value_objects import DetectionMethod, WakeWordEntry
+from app.domain.wakeword.entities import EndWordConfig, WakeWordConfig
+from app.domain.wakeword.value_objects import DetectionMethod, EndWordEntry, WakeWordEntry
 
 
 def _to_jsonable(value: Any) -> Any:
@@ -191,6 +191,13 @@ def settings_from_dict(device_id: str, data: dict[str, Any]) -> BotSettings:
         ),
     )
 
+    # End words (ADR-0016). When the key is absent (older persisted rows that
+    # predate the field), fall back to the default per-device list so existing
+    # devices keep ending conversations on the same JP phrases. When the key is
+    # present, it is authoritative (an explicit empty list means "no end words"
+    # -> the WS gate falls back to the global AppSettings list at runtime).
+    end_word = _build_end_word(data.get("end_word"), defaults.end_word)
+
     display_raw = data.get("display", {})
     display = DisplaySettings(
         brightness=display_raw.get("brightness", defaults.display.brightness),
@@ -208,7 +215,29 @@ def settings_from_dict(device_id: str, data: dict[str, Any]) -> BotSettings:
         attention=_build_attention(data.get("attention", {}), defaults.attention),
         proactive_talk=_build_proactive(data.get("proactive_talk", {}), defaults.proactive_talk),
         wake_word=wake_word,
+        end_word=end_word,
         display=display,
+    )
+
+
+def _build_end_word(raw: Any, default: EndWordConfig) -> EndWordConfig:
+    """Rebuild ``EndWordConfig`` from persisted JSON (ADR-0016).
+
+    ``raw is None`` means the key was absent (back-compat) -> keep the default
+    per-device list. A present dict (even with an empty ``end_words`` list) is
+    authoritative.
+    """
+    if raw is None:
+        return default
+    return EndWordConfig(
+        end_words=tuple(
+            EndWordEntry(
+                id=w["id"],
+                phrase=w["phrase"],
+                enabled=w.get("enabled", True),
+            )
+            for w in raw.get("end_words", [])
+        ),
     )
 
 

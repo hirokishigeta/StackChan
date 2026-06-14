@@ -13,8 +13,8 @@ from collections.abc import Callable
 
 from app.di_container import container as container_module
 from app.domain.settings.entities import BotSettings
-from app.domain.wakeword.entities import WakeWordConfig
-from app.domain.wakeword.value_objects import WakeWordEntry
+from app.domain.wakeword.entities import EndWordConfig, WakeWordConfig
+from app.domain.wakeword.value_objects import EndWordEntry, WakeWordEntry
 from fastapi.testclient import TestClient
 
 from tests.test_bot_audio_ws import (
@@ -38,6 +38,20 @@ def _seed_wake_words(*phrases: str) -> None:
     repo = container_module.get_container().repository
     entries = tuple(WakeWordEntry(id=f"ww-{i}", phrase=p) for i, p in enumerate(phrases))
     repo.save_settings(BotSettings(device_id=_DEVICE, wake_word=WakeWordConfig(wake_words=entries)))
+
+
+def _seed_wake_and_end_words(wake: tuple[str, ...], end: tuple[str, ...]) -> None:
+    """Store device settings with the given enabled wake words and end words."""
+    repo = container_module.get_container().repository
+    wake_entries = tuple(WakeWordEntry(id=f"ww-{i}", phrase=p) for i, p in enumerate(wake))
+    end_entries = tuple(EndWordEntry(id=f"ew-{i}", phrase=p) for i, p in enumerate(end))
+    repo.save_settings(
+        BotSettings(
+            device_id=_DEVICE,
+            wake_word=WakeWordConfig(wake_words=wake_entries),
+            end_word=EndWordConfig(end_words=end_entries),
+        )
+    )
 
 
 def _gate_client(
@@ -128,6 +142,69 @@ def test_once_engaged_following_non_wake_utterance_is_processed(
         for expected in ("llm", "tts", "tts", "tts"):
             assert ws.receive_json()["type"] == expected
     assert agent.messages == ["スタックチャン おはよう", "それで、続きの話なんだけど"]
+
+
+def test_engaged_session_ends_on_per_device_end_word(
+    audio_ws_client_factory: Callable[..., TestClient],
+) -> None:
+    """An engaged session ends on a DEVICE-configured end word (ADR-0016).
+
+    The end word here ("もうおしまい") is NOT in the global default
+    ``conversation_end_words`` list, so ending on it proves the per-device list
+    is what drives the gate. Ending -> the device is returned to wake-waiting
+    (``{"type":"wake","state":"waiting"}``), not stopped.
+    """
+    asr = _FakeAsr(text="ねえスタックチャン")
+    agent = _FakeAgent()
+    client = _gate_client(audio_ws_client_factory, agent=agent, asr=asr)
+    _seed_wake_and_end_words(wake=("スタックチャン",), end=("もうおしまい",))
+    with _connect(client) as ws:
+        ws.send_json(_HELLO)
+        ws.receive_json()
+        ws.send_json({"type": "listen", "state": "start", "mode": "manual"})
+        # First utterance engages.
+        ws.send_bytes(b"\x00" * 320)
+        ws.send_json({"type": "listen", "state": "stop"})
+        for expected in ("stt", "wake", "llm", "tts", "tts", "tts"):
+            assert ws.receive_json()["type"] == expected
+        # Second utterance contains the per-device end word -> conversation ends.
+        asr.text = "ありがとう、もうおしまい"
+        ws.send_bytes(b"\x00" * 320)
+        ws.send_json({"type": "listen", "state": "stop"})
+        assert ws.receive_json() == {"type": "stt", "text": "ありがとう、もうおしまい"}
+        for expected in ("llm", "tts", "tts", "tts"):
+            assert ws.receive_json()["type"] == expected
+        # Ending returns the device to wake-waiting (not a listen stop).
+        assert ws.receive_json() == {"type": "wake", "state": "waiting"}
+    # Both utterances reached the agent; the end word is still a real turn.
+    assert agent.messages == ["ねえスタックチャン", "ありがとう、もうおしまい"]
+
+
+def test_engaged_session_falls_back_to_global_end_words(
+    audio_ws_client_factory: Callable[..., TestClient],
+) -> None:
+    """With no device end words, the global AppSettings list ends the talk."""
+    asr = _FakeAsr(text="ねえスタックチャン")
+    agent = _FakeAgent()
+    client = _gate_client(audio_ws_client_factory, agent=agent, asr=asr)
+    # Wake words only -> device.end_word.end_words is empty -> global fallback.
+    _seed_wake_and_end_words(wake=("スタックチャン",), end=())
+    with _connect(client) as ws:
+        ws.send_json(_HELLO)
+        ws.receive_json()
+        ws.send_json({"type": "listen", "state": "start", "mode": "manual"})
+        ws.send_bytes(b"\x00" * 320)
+        ws.send_json({"type": "listen", "state": "stop"})
+        for expected in ("stt", "wake", "llm", "tts", "tts", "tts"):
+            assert ws.receive_json()["type"] == expected
+        # "ばいばい" is in the default global conversation_end_words list.
+        asr.text = "じゃあね、ばいばい"
+        ws.send_bytes(b"\x00" * 320)
+        ws.send_json({"type": "listen", "state": "stop"})
+        assert ws.receive_json() == {"type": "stt", "text": "じゃあね、ばいばい"}
+        for expected in ("llm", "tts", "tts", "tts"):
+            assert ws.receive_json()["type"] == expected
+        assert ws.receive_json() == {"type": "wake", "state": "waiting"}
 
 
 def test_gate_disabled_processes_everything(
