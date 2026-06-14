@@ -12,7 +12,7 @@ from app.application.ports.server_settings_repository import ServerSettingsRepos
 from app.application.ports.voice_config_provider import VoiceConfigProvider
 from app.application.ports.voice_sample_repository import VoiceSampleRepository
 from app.config.settings import AppSettings
-from app.domain.settings.value_objects import ServerVoiceSettings
+from app.domain.settings.value_objects import ServerHermesSettings, ServerVoiceSettings
 
 
 class UnknownVoiceSampleError(ValueError):
@@ -55,6 +55,25 @@ class ManageServerSettingsUseCase(VoiceConfigProvider):
                 raise UnknownVoiceSampleError(voice.voice_sample_id)
         self._repository.save_voice_override(voice)
         return voice
+
+    def current_hermes(self) -> ServerHermesSettings:
+        """Return effective Hermes settings: override if present else env defaults.
+
+        The API key is never part of this value: it stays env-only.
+        """
+        override = self._repository.get_hermes_override()
+        if override is not None:
+            return override
+        return ServerHermesSettings(
+            base_url=self._settings.hermes_base_url,
+            model=self._settings.hermes_model,
+            dashboard_url=self._settings.hermes_dashboard_url,
+        )
+
+    def update_hermes(self, hermes: ServerHermesSettings) -> ServerHermesSettings:
+        """Persist and return the updated Hermes connection override."""
+        self._repository.save_hermes_override(hermes)
+        return hermes
 
     def selected_reference_wav(self) -> str | None:
         """Resolve the selected sample's wav path, or ``None`` if none selected.

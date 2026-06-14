@@ -292,6 +292,7 @@
           <section class="panel active" data-panel="agent" style="--c: var(--c-agent)">
             <div class="panel-head"><div class="badge">🧠</div><h2>エージェント設定</h2></div>
             <p class="desc">このデバイスの AI の人格・話し方と、使うモデル・推論パラメータを決めます。</p>
+            <p class="hint" id="agent-delegation-note" style="display:none;color:var(--c-agent);font-weight:600">HermesAgent 選択中：人格・モデル・記憶・スキルは Hermes 側が管理します。下の「HermesAgent 接続」のみ有効です。</p>
             <div class="group">
               <h3>プロンプト</h3>
               <div class="grid">
@@ -340,6 +341,31 @@
               </div>
               <div class="check"><input type="checkbox" id="agent-tools_enabled" /><div class="ctext"><label for="agent-tools_enabled">ツール有効</label><p class="hint">関数・ツール呼び出しを許可します。</p></div></div>
               <div class="check"><input type="checkbox" id="agent-memory_enabled" /><div class="ctext"><label for="agent-memory_enabled">記憶有効</label><p class="hint">会話の文脈を保持します。</p></div></div>
+            </div>
+            <div class="group" id="agent-hermes-group" style="display:none">
+              <h3>HermesAgent 接続</h3>
+              <p class="hint">hermes-agent（OpenAI 互換 API サーバー）への接続先。サーバー全体の共通設定です。API キーはサーバーの <code>.env</code>（<code>STACKCHAN_HERMES_API_KEY</code>）で管理し、ここには出しません。</p>
+              <div class="grid">
+                <div class="field">
+                  <label for="hermes-base_url">API ベース URL</label>
+                  <p class="hint">例: http://127.0.0.1:8642/v1</p>
+                  <input type="text" id="hermes-base_url" placeholder="http://127.0.0.1:8642/v1" />
+                </div>
+                <div class="field">
+                  <label for="hermes-model">モデル</label>
+                  <p class="hint">通常は hermes-agent。</p>
+                  <input type="text" id="hermes-model" placeholder="hermes-agent" />
+                </div>
+                <div class="field full">
+                  <label for="hermes-dashboard_url">ダッシュボード URL（任意）</label>
+                  <p class="hint">「Hermes を開く」ボタンで開く URL。Hermes 自体に Web UI は無いため、Open WebUI 等のクライアント UI の URL を指定します。空のときはボタンは無効です。</p>
+                  <input type="text" id="hermes-dashboard_url" placeholder="http://..." />
+                </div>
+              </div>
+              <div class="row" style="display:flex;gap:8px;flex-wrap:wrap">
+                <button type="button" id="hermes-save-btn" class="primary" style="--c: var(--c-agent)">接続設定を保存</button>
+                <button type="button" id="hermes-open-btn" class="secondary">Hermes を開く ↗</button>
+              </div>
             </div>
           </section>
 
@@ -632,6 +658,7 @@
         setVal("agent-system_prompt", a.system_prompt);
         setVal("agent-model_name", a.model_name);
         setVal("agent-agent_type", a.agent_type);
+        applyAgentDelegation();
         setVal("agent-response_mode", a.response_mode);
         setVal("agent-temperature", a.temperature);
         setVal("agent-max_tokens", a.max_tokens);
@@ -1054,6 +1081,80 @@
         }
       }
 
+      // ---- HermesAgent (server-global connection settings) ----
+      // When HermesAgent is selected, persona/model/memory/skills are owned by
+      // Hermes, so our per-device agent fields are disabled (delegated).
+      function applyAgentDelegation() {
+        const isHermes = getVal("agent-agent_type") === "HermesAgent";
+        const grp = $("agent-hermes-group");
+        if (grp) grp.style.display = isHermes ? "" : "none";
+        const note = $("agent-delegation-note");
+        if (note) note.style.display = isHermes ? "" : "none";
+        const delegated = [
+          "agent-system_prompt", "agent-model_name", "agent-response_mode",
+          "agent-temperature", "agent-max_tokens", "agent-tools_enabled",
+          "agent-memory_enabled",
+        ];
+        for (const id of delegated) {
+          const el = $(id);
+          if (el) el.disabled = isHermes;
+        }
+      }
+
+      function updateHermesOpenBtn() {
+        const btn = $("hermes-open-btn");
+        if (btn) btn.disabled = !getVal("hermes-dashboard_url").trim();
+      }
+
+      function openHermes() {
+        const url = getVal("hermes-dashboard_url").trim();
+        if (!url) {
+          toast("ダッシュボード URL が未設定です", false);
+          return;
+        }
+        window.open(url, "_blank", "noopener");
+      }
+
+      async function loadHermes() {
+        try {
+          const resp = await fetch("/api/server-settings/hermes");
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const h = await resp.json();
+          setVal("hermes-base_url", h.base_url);
+          setVal("hermes-model", h.model);
+          setVal("hermes-dashboard_url", h.dashboard_url);
+          updateHermesOpenBtn();
+        } catch (e) {
+          toast("Hermes 設定の読み込み失敗: " + e.message, false);
+        }
+      }
+
+      async function saveHermes() {
+        try {
+          const resp = await fetch("/api/server-settings/hermes", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              base_url: getVal("hermes-base_url"),
+              model: getVal("hermes-model"),
+              dashboard_url: getVal("hermes-dashboard_url"),
+            }),
+          });
+          if (!resp.ok) {
+            const detail = await resp.json().catch(() => ({}));
+            throw new Error(JSON.stringify(detail.detail) || `HTTP ${resp.status}`);
+          }
+          const h = await resp.json();
+          setVal("hermes-base_url", h.base_url);
+          setVal("hermes-model", h.model);
+          setVal("hermes-dashboard_url", h.dashboard_url);
+          updateHermesOpenBtn();
+          toast("Hermes 接続設定を保存しました", true);
+        } catch (e) {
+          toast("保存失敗: " + e.message, false);
+        }
+      }
+
       function initDevices() {
         const sel = $("device-select");
         sel.innerHTML = "";
@@ -1090,12 +1191,17 @@
       $("device-form").addEventListener("submit", saveDevice);
       $("voice-form").addEventListener("submit", saveVoice);
       $("voice-gen-btn").addEventListener("click", generateVoiceSample);
+      $("agent-agent_type").addEventListener("change", applyAgentDelegation);
+      $("hermes-save-btn").addEventListener("click", saveHermes);
+      $("hermes-open-btn").addEventListener("click", openHermes);
+      $("hermes-dashboard_url").addEventListener("input", updateHermesOpenBtn);
 
       initTheme();
       initTabs();
       initDevices();
       loadDevice();
       loadVoiceSamples().then(loadVoice);
+      loadHermes();
     </script>
   </body>
 </html>

@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from app.domain.settings.value_objects import ServerVoiceSettings
+from app.domain.settings.value_objects import ServerHermesSettings, ServerVoiceSettings
 
 
 class ServerSettingsRepository(ABC):
-    """Persistence abstraction for the server-global voice override."""
+    """Persistence abstraction for the server-global voice / Hermes overrides."""
 
     @abstractmethod
     def get_voice_override(self) -> ServerVoiceSettings | None:
@@ -23,4 +23,14 @@ class ServerSettingsRepository(ABC):
     @abstractmethod
     def save_voice_override(self, voice: ServerVoiceSettings) -> None:
         """Persist (insert or replace) the voice override."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_hermes_override(self) -> ServerHermesSettings | None:
+        """Return the persisted Hermes connection override, or ``None`` if never set."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def save_hermes_override(self, hermes: ServerHermesSettings) -> None:
+        """Persist (insert or replace) the Hermes connection override."""
         raise NotImplementedError
