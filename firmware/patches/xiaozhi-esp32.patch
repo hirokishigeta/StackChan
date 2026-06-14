@@ -394,21 +394,23 @@ index 350ac58..22b454b 100644
  
  void AudioService::SetModelsList(srmodel_list_t* models_list) {
 diff --git a/main/audio/audio_service.h b/main/audio/audio_service.h
-index 99db546..fd1839d 100644
+index 99db546..90af149 100644
 --- a/main/audio/audio_service.h
 +++ b/main/audio/audio_service.h
-@@ -38,7 +38,9 @@
+@@ -38,7 +38,11 @@
  
  #define OPUS_FRAME_DURATION_MS 60
  #define MAX_ENCODE_TASKS_IN_QUEUE 2
 -#define MAX_PLAYBACK_TASKS_IN_QUEUE 2
-+// ~480ms of decoded playback buffering (8 x 60ms frames) to absorb network
-+// jitter and avoid intermittent underruns/crackle during TTS playback.
-+#define MAX_PLAYBACK_TASKS_IN_QUEUE 8
++// ~960ms of decoded playback buffering (16 x 60ms frames) to absorb network
++// jitter AND on-device CPU contention (always-listen AFE/wakenet competes with
++// the audio-output task), preventing intermittent underruns/crackle during
++// long TTS playback. The backend also fronts a larger prime cushion.
++#define MAX_PLAYBACK_TASKS_IN_QUEUE 16
  #define MAX_DECODE_PACKETS_IN_QUEUE (2400 / OPUS_FRAME_DURATION_MS)
  #define MAX_SEND_PACKETS_IN_QUEUE (2400 / OPUS_FRAME_DURATION_MS)
  #define AUDIO_TESTING_MAX_DURATION_MS 10000
-@@ -132,6 +134,10 @@ public:
+@@ -132,6 +136,10 @@ public:
      void PlaySound(const std::string_view& sound);
      bool ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples);
      void ResetDecoder();
