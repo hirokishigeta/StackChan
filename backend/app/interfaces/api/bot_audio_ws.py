@@ -521,6 +521,13 @@ class BotAudioHandler:
             session.speaking = False
             session.vad.reset()
             session.pcm_buffer = bytearray()
+            # Refresh the idle clock to *now* (after the bot finished speaking).
+            # The wake-gate idle timeout measures user silence; without this, a
+            # long reply (e.g. 20s+ of TTS) burns most of the idle budget while
+            # the bot is talking, so the user's next turn arrives "stale" and is
+            # transcribed but never handed to the agent (ADR-0014). Reset here so
+            # the timeout counts from when the bot stops, not from the prior turn.
+            session.last_activity = asyncio.get_running_loop().time()
         # Conversation lifecycle (§7): end when the agent judged it over OR the
         # user said an end word. The bot has already spoken its (farewell) reply.
         # Per-device end words (ADR-0016) resolved at listen start; fall back to
