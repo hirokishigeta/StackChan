@@ -81,6 +81,18 @@ class _FakeVoiceSampleRepository(VoiceSampleRepository):
     def resolve_wav_path(self, sample_id: str) -> str | None:
         return self._samples.get(sample_id)
 
+    def save(
+        self,
+        *,
+        sample_id: str,
+        pcm: bytes,
+        sample_rate: int,
+        label: str | None = None,
+        caption: str | None = None,
+    ) -> VoiceSample:
+        self._samples[sample_id] = f"/voices/{sample_id}.wav"
+        return VoiceSample(id=sample_id, label=label or sample_id)
+
 
 def test_repository_default_then_override(tmp_path: object) -> None:
     """The use case returns env defaults until an override is saved."""

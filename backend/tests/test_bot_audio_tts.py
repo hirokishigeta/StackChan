@@ -502,6 +502,49 @@ def test_irodori_synthesize_passes_ref_wav_when_set() -> None:
     assert captured["no_ref"] is False
 
 
+def test_irodori_generate_reference_uses_no_ref_caption_and_steps() -> None:
+    # generate_reference is the inverse of synthesize: no_ref=True with an
+    # explicit caption and the higher generation step count, used to mint a
+    # brand-new reference voice (ADR-0013).
+    from app.config.settings import AppSettings
+    from app.infrastructure.tts.irodori_tts_synthesizer import IrodoriTtsSynthesizer
+
+    class _FakeRequest:
+        def __init__(self, **kwargs: object) -> None:
+            self.__dict__.update(kwargs)
+
+    class _FakeResult:
+        audio = [[0.25, -0.25]]
+        sample_rate = 48000
+
+    captured: dict[str, object] = {}
+
+    class _FakeRuntime:
+        def synthesize(self, req: object) -> _FakeResult:
+            captured["text"] = req.text  # type: ignore[attr-defined]
+            captured["caption"] = req.caption  # type: ignore[attr-defined]
+            captured["ref_wav"] = req.ref_wav  # type: ignore[attr-defined]
+            captured["no_ref"] = req.no_ref  # type: ignore[attr-defined]
+            captured["num_steps"] = req.num_steps  # type: ignore[attr-defined]
+            captured["seed"] = req.seed  # type: ignore[attr-defined]
+            return _FakeResult()
+
+    synth = IrodoriTtsSynthesizer(
+        AppSettings(irodori_model_path="x", irodori_generation_num_steps=64, irodori_seed=7)
+    )
+    synth._runtime = _FakeRuntime()
+    synth._request_cls = _FakeRequest
+    out = synth.generate_reference(text="こんにちは", caption="明るい少女の声")
+
+    assert out.sample_rate == 48000
+    assert captured["text"] == "こんにちは"  # caption-driven, text passed verbatim
+    assert captured["caption"] == "明るい少女の声"
+    assert captured["ref_wav"] is None
+    assert captured["no_ref"] is True
+    assert captured["num_steps"] == 64
+    assert captured["seed"] == 7  # default from settings when not overridden
+
+
 def test_irodori_synthesize_normalizes_runtime_errors() -> None:
     from app.config.settings import AppSettings
     from app.infrastructure.tts.irodori_tts_synthesizer import IrodoriTtsSynthesizer

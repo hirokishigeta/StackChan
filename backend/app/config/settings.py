@@ -214,6 +214,10 @@ class AppSettings(BaseSettings):
     # speaker each call when this is None, so the voice drifts; a fixed seed pins
     # it (the caption still drives the style). Set None for random each turn.
     irodori_seed: int | None = 1234
+    # Higher diffusion step count used only when *minting* a reference voice
+    # (dashboard "ref生成", ADR-0013). Generation is one-off and quality matters
+    # more than latency, so we use more steps than the per-turn synthesize path.
+    irodori_generation_num_steps: int = 64
 
 
 @lru_cache

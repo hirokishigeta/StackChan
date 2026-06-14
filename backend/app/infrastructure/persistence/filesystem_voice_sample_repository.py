@@ -14,12 +14,21 @@ to ``None`` rather than escaping the directory (the API serves the bytes).
 from __future__ import annotations
 
 import json
+import re
+import wave
 from pathlib import Path
 
-from app.application.ports.voice_sample_repository import VoiceSampleRepository
+from app.application.ports.voice_sample_repository import (
+    DuplicateSampleError,
+    InvalidSampleIdError,
+    VoiceSampleRepository,
+)
 from app.domain.speech.value_objects import VoiceSample
 
 _METADATA_FILENAME = "samples.json"
+# A safe slug: ASCII letters / digits / dash / underscore, no separators. This
+# guarantees ``<id>.wav`` stays a direct child of the samples dir (no traversal).
+_SLUG_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 class FilesystemVoiceSampleRepository(VoiceSampleRepository):
@@ -61,6 +70,51 @@ class FilesystemVoiceSampleRepository(VoiceSampleRepository):
         if not candidate.is_file():
             return None
         return str(candidate)
+
+    def save(
+        self,
+        *,
+        sample_id: str,
+        pcm: bytes,
+        sample_rate: int,
+        label: str | None = None,
+        caption: str | None = None,
+    ) -> VoiceSample:
+        if not _SLUG_RE.match(sample_id):
+            raise InvalidSampleIdError(
+                f"invalid sample id {sample_id!r}: use only letters, digits, '-' and '_'"
+            )
+        self._dir.mkdir(parents=True, exist_ok=True)
+        wav_path = self._dir / f"{sample_id}.wav"
+        if wav_path.exists():
+            raise DuplicateSampleError(f"voice sample already exists: {sample_id!r}")
+
+        with wave.open(str(wav_path), "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)  # PCM16
+            wav.setframerate(int(sample_rate))
+            wav.writeframes(pcm)
+
+        resolved_label = (label or "").strip() or sample_id
+        self._merge_metadata(sample_id=sample_id, label=resolved_label, caption=caption)
+        return VoiceSample(id=sample_id, label=resolved_label)
+
+    def _merge_metadata(self, *, sample_id: str, label: str, caption: str | None) -> None:
+        """Add ``sample_id`` to samples.json without clobbering other entries."""
+        manifest = self._dir / _METADATA_FILENAME
+        data: dict[str, object] = {}
+        if manifest.is_file():
+            try:
+                loaded = json.loads(manifest.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                loaded = None
+            if isinstance(loaded, dict):
+                data = dict(loaded)
+        entry: dict[str, str] = {"label": label}
+        if caption and caption.strip():
+            entry["caption"] = caption.strip()
+        data[sample_id] = entry
+        manifest.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     @staticmethod
     def _load_labels(directory: Path) -> dict[str, str]:

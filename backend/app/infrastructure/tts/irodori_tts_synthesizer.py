@@ -212,6 +212,44 @@ class IrodoriTtsSynthesizer(SpeechSynthesizer):
         sample_rate = int(getattr(result, "sample_rate", self._settings.irodori_sample_rate))
         return SynthesizedAudio(pcm=pcm, sample_rate=sample_rate)
 
+    def generate_reference(
+        self, *, text: str, caption: str, seed: int | None = None
+    ) -> SynthesizedAudio:
+        """Mint a fresh reference voice from ``caption`` (no_ref, ADR-0013).
+
+        This is the *opposite* of :meth:`synthesize`'s production policy: it runs
+        the runtime with ``no_ref=True`` and the explicit VoiceDesign ``caption``
+        (no reference wav) at a higher quality step count, so the result is a
+        clean, brand-new voice the caller can persist as a selectable sample.
+        """
+        runtime = self._load_runtime()
+        request_cls: Any = self._request_cls
+        if request_cls is None:  # pragma: no cover - load_runtime always sets it
+            from irodori_tts.inference_runtime import SamplingRequest
+
+            request_cls = SamplingRequest
+
+        used_seed = seed if seed is not None else self._settings.irodori_seed
+        try:
+            result = runtime.synthesize(
+                request_cls(
+                    text=text,
+                    caption=caption,
+                    ref_wav=None,
+                    no_ref=True,
+                    num_candidates=1,
+                    decode_mode="sequential",
+                    num_steps=self._settings.irodori_generation_num_steps,
+                    seed=used_seed,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - normalize engine errors
+            raise SpeechSynthesisError(f"Irodori-TTS reference generation failed: {exc}") from exc
+
+        pcm = self._float_to_pcm16(result.audio)
+        sample_rate = int(getattr(result, "sample_rate", self._settings.irodori_sample_rate))
+        return SynthesizedAudio(pcm=pcm, sample_rate=sample_rate)
+
     @staticmethod
     def _float_to_pcm16(waveform: Any) -> bytes:
         """Convert a float waveform to little-endian PCM16 mono bytes.
