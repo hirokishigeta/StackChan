@@ -36,3 +36,14 @@ def test_plain_prose_unchanged() -> None:
 
 def test_empty_after_strip_falls_back_to_original() -> None:
     assert sanitize_for_speech("https://only-a-url.example") == "https://only-a-url.example"
+
+
+def test_url_strip_does_not_eat_japanese_after_url() -> None:
+    # No space after the URL (normal in Japanese): the URL must be removed but
+    # the following prose must survive (regression: \S+ ate it).
+    assert sanitize_for_speech("詳しくはhttps://example.com/aを見てね") == "詳しくはを見てね"
+    assert sanitize_for_speech("https://example.com今日は晴れ") == "今日は晴れ"
+
+
+def test_url_strip_stops_at_japanese_punctuation() -> None:
+    assert sanitize_for_speech("ここ→http://example.com。次の文。") == "ここ→。次の文。"

@@ -20,8 +20,15 @@ import re
 _CODE_FENCE = re.compile(r"```.*?```", re.DOTALL)
 # Markdown links/images: [label](url) / ![alt](url) -> keep the human label.
 _MD_LINK = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
-# Bare URLs (http(s):// or www.) up to the next whitespace.
-_BARE_URL = re.compile(r"\b(?:https?://|www\.)\S+", re.IGNORECASE)
+# Bare URLs (http(s):// or www.). Match only ASCII URL characters (RFC 3986
+# set) so the match STOPS at the first non-URL char — critically, Japanese has
+# no spaces, so a `\S+` here would greedily eat the prose that follows a URL
+# ("…https://x.com今日は晴れ" -> drops "今日は晴れ"). Do NOT use `\w` (it matches
+# Japanese in Unicode mode); enumerate ASCII URL chars explicitly.
+_BARE_URL = re.compile(
+    r"(?:https?://|www\.)[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+",
+    re.IGNORECASE,
+)
 # Inline code `x` -> x (drop the backticks, keep the word).
 _INLINE_CODE = re.compile(r"`([^`]*)`")
 # Leading markdown structure per line: headings (#), list bullets (-, *, +).
