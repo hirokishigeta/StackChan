@@ -43,6 +43,7 @@ from app.domain.agent.entities import AgentProfile
 from app.domain.agent.value_objects import AgentReply
 from app.domain.speech.entities import ConversationTurnConfig, SpeechRecognitionConfig
 from app.domain.speech.value_objects import AudioFormat
+from app.domain.wakeword.value_objects import matches_wake_word
 from app.infrastructure.audio.resample import resample_pcm16
 from app.infrastructure.transport.audio_frame_codec import (
     AudioFrameError,
@@ -103,6 +104,15 @@ class _Session:
     # tune turn-taking per device. ``None`` means no stored profile -> the global
     # VAD settings are used as the default.
     turn: ConversationTurnConfig | None = None
+    # Backend wake-word gate (ADR-0014). ``wake_words`` is the device's enabled
+    # wake phrases, resolved once at listen start (like ``turn``). ``engaged`` is
+    # True once a wake word has been heard; while engaged the conversation
+    # continues without re-saying it until ``last_activity`` goes stale (idle
+    # timeout). ``last_activity`` is an event-loop monotonic clock reading
+    # (asyncio loop.time()), NOT wall-clock time-of-day.
+    wake_words: tuple[str, ...] = ()
+    engaged: bool = False
+    last_activity: float = 0.0
     pcm_buffer: bytearray = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
@@ -205,6 +215,10 @@ class BotAudioHandler:
             # on VAD; real auto-mode devices always send mode:"auto" (§6).
             session.listen_mode = str(msg.get("mode", "manual"))
             session.turn = self._resolve_turn(session.device_id)
+            # Resolve the device's enabled wake words once per session and reset
+            # the gate so each new listen session starts un-engaged (ADR-0014).
+            session.wake_words = self._resolve_wake_words(session.device_id)
+            session.engaged = False
             session.vad.reset()
         elif state == "stop":
             # Manual mode: the device tells us when the utterance ends. (Auto-mode
@@ -374,7 +388,41 @@ class BotAudioHandler:
         if not result.text:
             await ws.send_json({"type": "tts", "state": "stop"})
             return
+        # Backend wake-word gate (ADR-0014): decide whether this utterance should
+        # engage the agent at all. Default-off; when disabled this is a no-op and
+        # behavior is exactly as before.
+        if not self._wake_gate_allows(session, result.text):
+            # Ambient speech without the wake word (or a stale-engaged session
+            # that didn't re-trigger): ignore it but cleanly return the device to
+            # listening so it doesn't wait for a reply.
+            await ws.send_json({"type": "tts", "state": "stop"})
+            return
         await self._run_agent_turn(ws, session, result.text)
+
+    def _wake_gate_allows(self, session: _Session, text: str) -> bool:
+        """Return True if ``text`` should be handed to the agent (ADR-0014).
+
+        No-op (always True) when the gate is disabled. When enabled: an already
+        engaged session continues until it goes idle past ``wake_idle_timeout_ms``;
+        otherwise the utterance must contain one of the device's wake words. On a
+        positive decision the session is marked engaged and its activity clock is
+        bumped so the conversation can continue.
+        """
+        if not self._settings.wake_word_gate_enabled:
+            return True
+        now = asyncio.get_running_loop().time()
+        if session.engaged:
+            idle_s = self._settings.wake_idle_timeout_ms / 1000.0
+            if now - session.last_activity <= idle_s:
+                session.last_activity = now
+                return True
+            # Gone idle: fall through and require a wake word again.
+            session.engaged = False
+        if matches_wake_word(text, session.wake_words):
+            session.engaged = True
+            session.last_activity = now
+            return True
+        return False
 
     async def _run_agent_turn(self, ws: WebSocket, session: _Session, user_text: str) -> None:
         # Recognized user text (xiaozhi `stt`, §2.2).
@@ -425,6 +473,9 @@ class BotAudioHandler:
         if reply.end_conversation:
             logger.info("agent_turn: end_conversation -> stop listening")
             session.listening = False
+            # Disengage the wake gate so the next session starts un-engaged and a
+            # wake word is required again (ADR-0014). No-op when the gate is off.
+            session.engaged = False
             await ws.send_json({"type": "listen", "state": "stop"})
 
     def _synthesize_resample(self, reply: AgentReply, downlink: AudioFormat) -> bytes | None:
@@ -539,6 +590,18 @@ class BotAudioHandler:
     def _resolve_turn(self, device_id: str) -> ConversationTurnConfig | None:
         settings = self._repository.get_settings(device_id)
         return settings.conversation_turn if settings is not None else None
+
+    def _resolve_wake_words(self, device_id: str) -> tuple[str, ...]:
+        """Enabled wake phrases for the device's backend wake gate (ADR-0014).
+
+        Returns the phrases of the enabled wake-word entries from the device's
+        stored BotSettings (empty when no settings or none enabled). Resolved
+        once at listen start, mirroring ``_resolve_turn``.
+        """
+        settings = self._repository.get_settings(device_id)
+        if settings is None:
+            return ()
+        return tuple(w.phrase for w in settings.wake_word.wake_words if w.enabled)
 
 
 @router.websocket("/{device_id}/audio")

@@ -122,6 +122,18 @@ class AppSettings(BaseSettings):
     # doubled/garbled next utterance. Should cover the device's buffer depth.
     tts_postroll_gate_ms: int = 1500
 
+    # Backend-side wake-word gating (ADR-0014). When the firmware streams audio
+    # continuously (VAD-gated, no on-device wake word), the backend decides when
+    # to engage: a finalized utterance is only handed to the agent once it
+    # contains one of the device's configured wake words (matched on the STT
+    # transcript text — arbitrary Japanese, no extra model). Default OFF so the
+    # current on-device-wake behavior is unchanged until the firmware is ready.
+    wake_word_gate_enabled: bool = False
+    # Once engaged, the conversation stays open without re-saying the wake word
+    # until this much wall-clock idle time passes between processed turns; after
+    # that the gate disengages and the next utterance must include a wake word.
+    wake_idle_timeout_ms: int = 30000
+
     # Downlink (server -> device) audio_params returned in the server hello.
     # These values are negotiated so firmware (#5) can rely on them; the
     # downlink TTS audio path (#7-b) resamples/encodes to these.
