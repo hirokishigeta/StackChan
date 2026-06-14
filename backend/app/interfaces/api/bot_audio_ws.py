@@ -597,18 +597,26 @@ class BotAudioHandler:
         frame_s: float,
         silence_pcm: bytes,
     ) -> int:
-        """Stream paced silence until the first synthesis is ready (and at least
-        the configured lead). This (a) bridges synth latency without starving the
+        """Stream silence until the first synthesis is ready (and at least the
+        configured lead). This (a) bridges synth latency without starving the
         device's I2S — an underrun there clipped the opening syllable — and (b)
-        absorbs the device's playback-start drop on silence instead of on speech.
+        primes the device's playback buffer with a cushion of frames.
+
+        The first ``downlink_prime_frames`` silence frames are sent *back to
+        back* (no real-time pacing) so the device's playback queue fills up
+        before its output task drains it — without that head start the device
+        plays each frame as soon as it arrives, so any decode jitter underruns
+        the I2S and crackles (worst at speech onset). After the prime burst we
+        pace at real time so the cushion is maintained, not grown unbounded.
         Capped by ``tts_max_bridge_ms`` so a hung synth can't stream forever.
         Returns the number of silence frames sent.
         """
         loop = asyncio.get_running_loop()
         min_bridge_frames = self._settings.downlink_lead_silence_ms // frame_ms
+        prime_frames = max(0, self._settings.downlink_prime_frames)
         max_bridge_s = self._settings.tts_max_bridge_ms / 1000.0
         t0 = loop.time()
-        deadline = t0
+        deadline: float | None = None
         sent = 0
         i = 0
         while min_bridge_frames > 0 and not (synth_future.done() and i >= min_bridge_frames):
@@ -622,6 +630,12 @@ class BotAudioHandler:
                 logger.warning("TTS bridge encode failed: %s", exc)
                 break
             i += 1
+            # Prime burst: send the first prime_frames as fast as the socket
+            # accepts them so the device builds a buffer cushion. Pace the rest.
+            if i <= prime_frames:
+                continue
+            if deadline is None:
+                deadline = loop.time()  # start the real-time clock after the burst
             deadline += frame_s
             d = deadline - loop.time()
             if d > 0:
