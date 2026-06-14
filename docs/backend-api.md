@@ -378,10 +378,10 @@ JSON 形は `settings_to_dict` / `settings_from_dict`（`infrastructure/persiste
 | 設定 永続化（GET/PUT/wakeword 設定） | 実動 | `SqliteSettingsRepository` | — |
 | コマンド取得 | 実動（ポーリング） | `InMemoryBotEventPublisher.drain` | TODO(issue#8) WS 化 |
 | Agent: OpenAICompatible | 実動 | `OpenAICompatibleGateway`（httpx） | — |
-| Agent: HermesAgent | スタブ（固定文 `[HermesAgent stub] ... (TODO issue#6)`） | `hermes_agent_gateway.py` | TODO(issue#6) |
+| Agent: HermesAgent | 実動（OpenAI 互換で hermes-agent API:8642 に接続、persona/model 委譲、ストリーミングでツール進捗表示） | `hermes_agent_gateway.py`（ADR-0024/0026） | フォロー: `/v1/responses`・jobs 連携 |
 | Agent: OpenClaw | スタブ（固定文 `[OpenClaw stub] ... (TODO issue#6)`） | `openclaw_gateway.py` | TODO(issue#6) |
 | Agent: Dummy | テスト/フォールバック用固定応答 | `dummy_agent_gateway.py` | — |
-| Speech 認識 | ダミー（固定 `こんにちは`） | `DummySpeechRecognizer` | TODO(issue#7) |
+| Speech 認識 | 実動（sherpa-onnx、NeMo Parakeet 日本語 / 既定はダミー、本番は env で sherpa-onnx） | `SherpaOnnxSpeechRecognizer` / `DummySpeechRecognizer`（ADR-0019） | エコー除去 ADR-0028 |
 | Vision 検出 | ダミー（固定 face） | `DummyVisionRecognizer` | TODO(issue#6/#8) |
 | WakeWord 検知 | ダミー（先頭の有効語を返す） | `DummyWakeWordDetector` | TODO(issue#7) |
 | Dashboard | 実動（最小・一覧のみ） | `dashboard/routes.py` | 後続フェーズで設定 UI |
