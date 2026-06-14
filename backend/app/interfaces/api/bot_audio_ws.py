@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import re
 import struct
 import uuid
 from dataclasses import dataclass, field
@@ -40,7 +41,6 @@ from app.application.ports.speech_synthesizer import SpeechSynthesisError, Speec
 from app.config.settings import AppSettings
 from app.di_container import container as container_module
 from app.domain.agent.entities import AgentProfile
-from app.domain.agent.value_objects import AgentReply
 from app.domain.speech.entities import ConversationTurnConfig, SpeechRecognitionConfig
 from app.domain.speech.value_objects import AudioFormat
 from app.domain.wakeword.value_objects import canonicalize_wake_word, matches_wake_word
@@ -56,6 +56,18 @@ router = APIRouter(prefix="/api/bot", tags=["bot-audio"])
 # Use uvicorn's logger so these diagnostics are visible under `uvicorn` without
 # extra logging config (the default config does not surface arbitrary loggers).
 logger = logging.getLogger("uvicorn.error")
+
+# Split a reply into sentences so TTS is synthesized and streamed one sentence
+# at a time (#: per-sentence streaming). Boundaries are Japanese/Latin sentence
+# enders and newlines; the delimiter is kept on the preceding sentence. This
+# keeps each downlink chunk short — lower time-to-first-voice, the device shows
+# one sentence at a time (no overflow), and a long reply is never one giant
+# playback that starves the device's decoder into choppy/garbled audio.
+_SENTENCE_BOUNDARY = re.compile(r"(?<=[。．！？!?\n])")
+
+
+def _split_sentences(text: str) -> list[str]:
+    return [s.strip() for s in _SENTENCE_BOUNDARY.split(text) if s.strip()]
 
 
 @dataclass
@@ -509,12 +521,13 @@ class BotAudioHandler:
         # closed) cannot immediately re-finalize once we re-open the mic.
         session.speaking = True
         try:
-            # tts.start -> (downlink Opus audio frames) -> sentence_start text ->
-            # tts.stop. The audio frames are #7-b; the JSON sequence is unchanged
-            # from #7-a so the device's existing path keeps working.
+            # tts.start -> per sentence: sentence_start text -> (downlink Opus
+            # audio frames) -> ... -> tts.stop. Streaming one sentence at a time
+            # keeps each chunk short (see _split_sentences) so a long reply does
+            # not become one huge playback that starves the device decoder.
             await ws.send_json({"type": "tts", "state": "start"})
-            await ws.send_json({"type": "tts", "state": "sentence_start", "text": reply.text})
-            await self._send_tts_audio(ws, session, reply)
+            sentences = _split_sentences(reply.text) or [reply.text]
+            await self._stream_reply(ws, session, sentences, reply.emotion)
             await ws.send_json({"type": "tts", "state": "stop"})
             # Post-roll cooldown: the device keeps playing its buffered audio for
             # a short while AFTER tts.stop (downlink is paced ~real-time but the
@@ -556,16 +569,17 @@ class BotAudioHandler:
                 session.listening = False
                 await ws.send_json({"type": "listen", "state": "stop"})
 
-    def _synthesize_resample(self, reply: AgentReply, downlink: AudioFormat) -> bytes | None:
-        """Synthesize + resample to the downlink rate (runs in a worker thread).
+    def _synthesize_text(self, text: str, emotion: str, downlink: AudioFormat) -> bytes | None:
+        """Synthesize one sentence + resample to the downlink rate (worker thread).
 
         Returns resampled PCM16 bytes, or None on synthesis failure (logged).
         Does NOT touch the Opus encoder (that is stateful and used only on the
         event-loop thread). Heavy/torch work happens here off the loop so the
-        caller can keep the device's audio pipe fed with silence meanwhile.
+        caller can keep the device's audio pipe fed meanwhile / prefetch the
+        next sentence.
         """
         try:
-            audio = self._synthesizer.synthesize(text=reply.text, emotion=reply.emotion)
+            audio = self._synthesizer.synthesize(text=text, emotion=emotion)
         except (SpeechSynthesisError, ValueError) as exc:
             logger.warning("TTS synthesis failed (text-only fallback): %s", exc)
             return None
@@ -573,45 +587,30 @@ class BotAudioHandler:
             pcm=audio.pcm, src_rate=audio.sample_rate, dst_rate=downlink.sample_rate
         )
 
-    async def _send_tts_audio(self, ws: WebSocket, session: _Session, reply: AgentReply) -> None:
-        """Synthesize the reply and stream downlink Opus frames (#7-b).
-
-        Synthesis runs in a worker thread; meanwhile we stream paced *silence* to
-        the device. This (a) bridges the ~1s synth latency without leaving the
-        device's I2S starved — an underrun there clipped the opening syllable —
-        and (b) absorbs the device's playback-start drop on that silence instead
-        of on real speech. When synthesis completes we switch to the real frames
-        contiguously (same Opus stream). Net: the synth-wait and the start-drop
-        overlap into one bridge instead of stacking (synth-wait + fixed pad), so
-        time-to-voice is roughly max(synth, drop) not their sum. A synth failure
-        degrades to a text-only turn (design-spec §13).
+    async def _bridge_silence(
+        self,
+        ws: WebSocket,
+        session: _Session,
+        synth_future: asyncio.Future[bytes | None],
+        downlink: AudioFormat,
+        frame_ms: int,
+        frame_s: float,
+        silence_pcm: bytes,
+    ) -> int:
+        """Stream paced silence until the first synthesis is ready (and at least
+        the configured lead). This (a) bridges synth latency without starving the
+        device's I2S — an underrun there clipped the opening syllable — and (b)
+        absorbs the device's playback-start drop on silence instead of on speech.
+        Capped by ``tts_max_bridge_ms`` so a hung synth can't stream forever.
+        Returns the number of silence frames sent.
         """
-        downlink = AudioFormat(
-            codec="opus",
-            sample_rate=self._settings.downlink_sample_rate,
-            channels=self._settings.downlink_channels,
-            frame_duration_ms=self._settings.downlink_frame_duration_ms,
-        )
-        frame_ms = downlink.frame_duration_ms or self._settings.downlink_frame_duration_ms
-        frame_s = max(frame_ms, 1) / 1000.0
-        samples_per_frame = downlink.sample_rate * frame_ms // 1000
-        silence_pcm = b"\x00" * (samples_per_frame * downlink.channels * 2)
         loop = asyncio.get_running_loop()
-
-        t0 = loop.time()
-        synth_future = loop.run_in_executor(None, self._synthesize_resample, reply, downlink)
-
-        # 1) Bridge: paced silence until synthesis is ready (and at least the
-        #    configured lead so the start-drop always lands on silence). Capped
-        #    so a hung synth can't stream silence forever.
         min_bridge_frames = self._settings.downlink_lead_silence_ms // frame_ms
         max_bridge_s = self._settings.tts_max_bridge_ms / 1000.0
+        t0 = loop.time()
+        deadline = t0
         sent = 0
         i = 0
-        deadline = loop.time()
-        # Only bridge when a lead is configured (>0). With lead=0 we just await
-        # synthesis and send the real frames (no silence) — keeps the framing
-        # deterministic for callers/tests that don't want a bridge.
         while min_bridge_frames > 0 and not (synth_future.done() and i >= min_bridge_frames):
             if session.aborted or (loop.time() - t0) > max_bridge_s:
                 break
@@ -627,39 +626,75 @@ class BotAudioHandler:
             d = deadline - loop.time()
             if d > 0:
                 await asyncio.sleep(d)
+        return sent
 
-        # 2) Real audio (synthesis result), encoded contiguously after the
-        #    silence and paced at real time (deadline-scheduled, no drift).
-        pcm = await synth_future
-        synth_ms = (loop.time() - t0) * 1000.0
-        if pcm is None or session.aborted:
-            logger.info("TTS downlink: bridge=%d silence frame(s), no audio", sent)
-            return
-        try:
-            payloads = self._encoder.encode(pcm=pcm, audio_format=downlink)
-        except (AudioEncodeError, ValueError) as exc:
-            logger.warning("TTS downlink skipped (encode failed): %s", exc)
-            return
-        audio_ms = (len(pcm) / 2) / max(downlink.sample_rate, 1) * 1000.0
-        logger.info(
-            "TTS downlink: synth=%.0fms (bridge %d frames) -> %d opus frame(s) for %.0fms audio",
-            synth_ms,
-            sent,
-            len(payloads),
-            audio_ms,
+    async def _stream_reply(
+        self, ws: WebSocket, session: _Session, sentences: list[str], emotion: str
+    ) -> None:
+        """Synthesize and stream the reply one sentence at a time (#7-b).
+
+        Each sentence is synthesized in a worker thread; the *next* sentence is
+        prefetched while the current one is streamed, so playback is gapless
+        without ever building one huge buffer. Only the first sentence gets the
+        lead-in silence bridge (the device's playback-start clip happens once);
+        later sentences are already prefetched, so they follow contiguously.
+        A per-sentence synth failure degrades that sentence to text-only.
+        """
+        downlink = AudioFormat(
+            codec="opus",
+            sample_rate=self._settings.downlink_sample_rate,
+            channels=self._settings.downlink_channels,
+            frame_duration_ms=self._settings.downlink_frame_duration_ms,
         )
-        real0 = loop.time()
-        for idx, payload in enumerate(payloads):
+        frame_ms = downlink.frame_duration_ms or self._settings.downlink_frame_duration_ms
+        frame_s = max(frame_ms, 1) / 1000.0
+        samples_per_frame = downlink.sample_rate * frame_ms // 1000
+        silence_pcm = b"\x00" * (samples_per_frame * downlink.channels * 2)
+        loop = asyncio.get_running_loop()
+
+        def _kick(text: str) -> asyncio.Future[bytes | None]:
+            return loop.run_in_executor(None, self._synthesize_text, text, emotion, downlink)
+
+        next_future: asyncio.Future[bytes | None] | None = _kick(sentences[0])
+        total_sent = 0
+        for idx, sentence in enumerate(sentences):
+            if session.aborted or next_future is None:
+                break
+            synth_future = next_future
+            # Show the sentence text (firmware displays it), then its audio.
+            await ws.send_json({"type": "tts", "state": "sentence_start", "text": sentence})
+            if idx == 0:
+                total_sent += await self._bridge_silence(
+                    ws, session, synth_future, downlink, frame_ms, frame_s, silence_pcm
+                )
+            pcm = await synth_future
+            # Prefetch the next sentence while we stream this one (gapless).
+            next_future = _kick(sentences[idx + 1]) if idx + 1 < len(sentences) else None
             if session.aborted:
                 break
-            await ws.send_bytes(encode_frame(payload=payload, version=session.binary_version))
-            sent += 1
-            # Deadline-paced at real time; the bridge already filled the device
-            # buffer so we start the clock at the first real frame.
-            delay = real0 + (idx + 1) * frame_s - loop.time()
-            if delay > 0:
-                await asyncio.sleep(delay)
-        logger.info("TTS downlink: sent %d frame(s) total (bridged+paced)", sent)
+            if pcm is None:
+                continue
+            try:
+                payloads = self._encoder.encode(pcm=pcm, audio_format=downlink)
+            except (AudioEncodeError, ValueError) as exc:
+                logger.warning("TTS downlink skipped (encode failed): %s", exc)
+                continue
+            real0 = loop.time()
+            for fidx, payload in enumerate(payloads):
+                if session.aborted:
+                    break
+                await ws.send_bytes(encode_frame(payload=payload, version=session.binary_version))
+                total_sent += 1
+                # Deadline-paced at real time (no drift); the device buffer
+                # absorbs the tiny inter-sentence gap.
+                delay = real0 + (fidx + 1) * frame_s - loop.time()
+                if delay > 0:
+                    await asyncio.sleep(delay)
+        logger.info(
+            "TTS downlink: %d sentence(s), %d frame(s) total (per-sentence)",
+            len(sentences),
+            total_sent,
+        )
 
     def _resolve_profile(self, device_id: str) -> AgentProfile:
         settings = self._repository.get_settings(device_id)

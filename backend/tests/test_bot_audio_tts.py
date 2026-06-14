@@ -565,3 +565,27 @@ def test_irodori_synthesize_normalizes_runtime_errors() -> None:
     except SpeechSynthesisError:
         return
     raise AssertionError("engine error must surface as SpeechSynthesisError")
+
+
+def test_split_sentences_splits_on_japanese_and_latin_enders() -> None:
+    from app.interfaces.api.bot_audio_ws import _split_sentences
+
+    # Boundaries: 。．！？!? and newline. ASCII "." is intentionally NOT a
+    # boundary (would mis-split decimals/abbreviations in mixed text).
+    text = "こんにちは。元気？\nそれは良い！Yes. ok"
+    assert _split_sentences(text) == ["こんにちは。", "元気？", "それは良い！", "Yes. ok"]
+
+
+def test_split_sentences_keeps_single_sentence_intact() -> None:
+    from app.interfaces.api.bot_audio_ws import _split_sentences
+
+    # No boundary -> one chunk; trailing whitespace stripped.
+    assert _split_sentences("元気だよ") == ["元気だよ"]
+    assert _split_sentences("やっほー！") == ["やっほー！"]
+
+
+def test_split_sentences_drops_empty_fragments() -> None:
+    from app.interfaces.api.bot_audio_ws import _split_sentences
+
+    assert _split_sentences("はい。。\n\n  そう。") == ["はい。", "。", "そう。"]
+    assert _split_sentences("") == []
