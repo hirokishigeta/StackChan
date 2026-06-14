@@ -235,6 +235,63 @@ def test_gate_corrects_mistranscribed_wake_word_for_agent(
     assert agent.messages == ["ベルちゃん、こんにちは"]
 
 
+def test_gate_engages_on_fuzzy_mistranscription_and_corrects(
+    audio_ws_client_factory: Callable[..., TestClient],
+) -> None:
+    """A fuzzy (edit-distance) mis-transcription engages and is canonicalized (ADR-0018).
+
+    Only the canonical "ベルちゃん" is configured (no enumerated variant). The
+    ASR returns the garble "ねるちゃん" (Levenshtein distance 1). With
+    ``wake_fuzzy_max_dist`` > 0 the gate still engages, and the fuzzy span is
+    rewritten to the canonical name before the agent sees it.
+    """
+    asr = _FakeAsr(text="ねるちゃん、こんにちは")
+    agent = _FakeAgent()
+    client = audio_ws_client_factory(
+        gateway=agent,
+        speech_recognizer=asr,
+        audio_decoder=_FakeDecoder(),
+        speech_synthesizer=_SilentSynth(),
+        settings_overrides={"wake_word_gate_enabled": True, "wake_fuzzy_max_dist": 2},
+    )
+    _seed_wake_words("ベルちゃん")
+    with _connect(client) as ws:
+        ws.send_json(_HELLO)
+        ws.receive_json()
+        ws.send_json({"type": "listen", "state": "start", "mode": "manual"})
+        ws.send_bytes(b"\x00" * 320)
+        ws.send_json({"type": "listen", "state": "stop"})
+        # Corrected canonical text flows downstream (stt + agent).
+        assert ws.receive_json() == {"type": "stt", "text": "ベルちゃん、こんにちは"}
+        for expected in ("wake", "llm", "tts", "tts", "tts"):
+            assert ws.receive_json()["type"] == expected
+    assert agent.messages == ["ベルちゃん、こんにちは"]
+
+
+def test_gate_ignores_fuzzy_match_when_disabled(
+    audio_ws_client_factory: Callable[..., TestClient],
+) -> None:
+    """With ``wake_fuzzy_max_dist=0`` a garble does NOT engage (exact-only)."""
+    asr = _FakeAsr(text="ねるちゃん、こんにちは")
+    agent = _FakeAgent()
+    client = audio_ws_client_factory(
+        gateway=agent,
+        speech_recognizer=asr,
+        audio_decoder=_FakeDecoder(),
+        speech_synthesizer=_SilentSynth(),
+        settings_overrides={"wake_word_gate_enabled": True, "wake_fuzzy_max_dist": 0},
+    )
+    _seed_wake_words("ベルちゃん")
+    with _connect(client) as ws:
+        ws.send_json(_HELLO)
+        ws.receive_json()
+        ws.send_json({"type": "listen", "state": "start", "mode": "manual"})
+        ws.send_bytes(b"\x00" * 320)
+        ws.send_json({"type": "listen", "state": "stop"})
+        assert ws.receive_json() == {"type": "tts", "state": "stop"}
+    assert agent.messages == []
+
+
 def test_gate_disabled_processes_everything(
     audio_ws_client_factory: Callable[..., TestClient],
 ) -> None:
