@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 #include "stackchan_display.h"
+#include "application.h"
 #include <esp_log.h>
 #include <esp_err.h>
 #include <esp_lvgl_port.h>
@@ -503,7 +504,13 @@ void StackChanAvatarDisplay::SetStatus(const char* status)
             speaking_modifier_id_ = -1;
         }
 
-        GetHAL().setRgbColor(0, 0, 50, 0);
+        if (Application::GetInstance().IsConversationEngaged()) {
+            // 会話中: green
+            GetHAL().setRgbColor(0, 0, 50, 0);
+        } else {
+            // 待機・呼びかけ待ち: warm amber
+            GetHAL().setRgbColor(0, 50, 25, 0);
+        }
         GetHAL().refreshRgb();
 
     } else if (strcmp(status, Lang::Strings::STANDBY) == 0) {

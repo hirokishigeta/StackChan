@@ -1,8 +1,8 @@
 diff --git a/main/application.cc b/main/application.cc
-index d69d43d..5a797b4 100644
+index d69d43d..ad92767 100644
 --- a/main/application.cc
 +++ b/main/application.cc
-@@ -547,6 +547,16 @@ void Application::InitializeProtocol() {
+@@ -547,6 +547,33 @@ void Application::InitializeProtocol() {
                      });
                  }
              }
@@ -16,10 +16,27 @@ index d69d43d..5a797b4 100644
 +                    SetDeviceState(kDeviceStateIdle);
 +                });
 +            }
++        } else if (strcmp(type->valuestring, "wake") == 0) {
++            // Conversation engagement signal from the backend: "engaged" while
++            // actively conversing, "waiting" while listening for the wake word.
++            // Track it and re-apply the listening status so the RGB LED color
++            // reflects the current engagement (green vs. wake-waiting amber).
++            auto state = cJSON_GetObjectItem(root, "state");
++            if (cJSON_IsString(state)) {
++                conversation_engaged_ = (strcmp(state->valuestring, "engaged") == 0);
++                Schedule([this]() {
++                    if (GetDeviceState() == kDeviceStateListening) {
++                        auto display = Board::GetInstance().GetDisplay();
++                        if (display != nullptr) {
++                            display->SetStatus(Lang::Strings::LISTENING);
++                        }
++                    }
++                });
++            }
          } else if (strcmp(type->valuestring, "stt") == 0) {
              auto text = cJSON_GetObjectItem(root, "text");
              if (cJSON_IsString(text)) {
-@@ -610,33 +620,36 @@ void Application::InitializeProtocol() {
+@@ -610,33 +637,36 @@ void Application::InitializeProtocol() {
  }
  
  void Application::ShowActivationCode(const std::string& code, const std::string& message) {
@@ -83,7 +100,7 @@ index d69d43d..5a797b4 100644
  }
  
  void Application::Alert(const char* status, const char* message, const char* emotion, const std::string_view& sound) {
-@@ -869,6 +882,25 @@ void Application::HandleStateChangedEvent() {
+@@ -869,6 +899,25 @@ void Application::HandleStateChangedEvent() {
              display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
              audio_service_.EnableVoiceProcessing(false);
              audio_service_.EnableWakeWordDetection(true);
@@ -109,7 +126,7 @@ index d69d43d..5a797b4 100644
              break;
          case kDeviceStateConnecting:
              display->SetStatus(Lang::Strings::CONNECTING);
-@@ -915,6 +947,10 @@ void Application::HandleStateChangedEvent() {
+@@ -915,6 +964,10 @@ void Application::HandleStateChangedEvent() {
                  audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
              }
              audio_service_.ResetDecoder();
@@ -120,6 +137,26 @@ index d69d43d..5a797b4 100644
              break;
          case kDeviceStateWifiConfiguring:
              audio_service_.EnableVoiceProcessing(false);
+diff --git a/main/application.h b/main/application.h
+index 7ca7af4..ef9bc14 100644
+--- a/main/application.h
++++ b/main/application.h
+@@ -65,6 +65,7 @@ public:
+ 
+     DeviceState GetDeviceState() const { return state_machine_.GetState(); }
+     bool IsVoiceDetected() const { return audio_service_.IsVoiceDetected(); }
++    bool IsConversationEngaged() const { return conversation_engaged_; }
+     
+     /**
+      * Request state transition
+@@ -138,6 +139,7 @@ private:
+ 
+     bool has_server_time_ = false;
+     bool aborted_ = false;
++    bool conversation_engaged_ = false;
+     bool assets_version_checked_ = false;
+     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
+     int clock_ticks_ = 0;
 diff --git a/main/assets.cc b/main/assets.cc
 index ad61944..6b84daf 100644
 --- a/main/assets.cc
