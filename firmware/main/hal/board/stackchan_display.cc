@@ -263,7 +263,13 @@ void StackChanAvatarDisplay::SetupUI()
 
         if (hal_bridge::is_xiaozhi_ready()) {
             last_toggle_tick = now;
+#if defined(CONFIG_STACKCHAN_BACKEND_WAKE) && CONFIG_STACKCHAN_BACKEND_WAKE
+            // Backend wake / always-listen: a tap ends the conversation and
+            // returns to wake-word waiting (does NOT close the audio channel).
+            hal_bridge::request_wake_waiting();
+#else
             hal_bridge::toggle_xiaozhi_chat_state();
+#endif
         }
     });
 
