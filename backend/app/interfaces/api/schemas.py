@@ -138,5 +138,4 @@ class WakeWordEntrySchema(BaseModel):
 
 class WakeWordResponse(BaseModel):
     enabled: bool
-    detection_method: str
     wake_words: list[WakeWordEntrySchema]

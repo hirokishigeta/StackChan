@@ -448,21 +448,6 @@
             <p class="desc">話しかけて呼び出す合言葉。検出はデバイス側 (esp-sr) で行い、ここで登録したリストをデバイスが取得します。複数登録できます。</p>
             <div class="group">
               <div class="check"><input type="checkbox" id="wake_word-enabled" /><div class="ctext"><label for="wake_word-enabled">ウェイクワード有効</label><p class="hint">オフにすると合言葉での呼び出しを無効化します。</p></div></div>
-              <div class="grid">
-                <div class="field">
-                  <label for="wake_word-detection_method">検出場所</label>
-                  <p class="hint">local=デバイス側 (esp-sr)、backend=PC 側。通常は local。</p>
-                  <select id="wake_word-detection_method">
-                    <option value="local">local</option>
-                    <option value="backend">backend</option>
-                  </select>
-                </div>
-                <div class="field">
-                  <label for="wake_word-max_local_active">デバイス側同時有効数</label>
-                  <p class="hint">local 検出で同時に有効化できる上限。超過分は無効になります。</p>
-                  <input type="number" id="wake_word-max_local_active" step="1" min="1" />
-                </div>
-              </div>
             </div>
             <div class="group">
               <h3>登録ワード</h3>
@@ -680,8 +665,6 @@
 
         const ww = s.wake_word || {};
         setVal("wake_word-enabled", ww.enabled);
-        setVal("wake_word-detection_method", ww.detection_method || "local");
-        setVal("wake_word-max_local_active", ww.max_local_active);
         renderWakeWordRows(Array.isArray(ww.wake_words) ? ww.wake_words : []);
 
         const ew = s.end_word || {};
@@ -888,8 +871,6 @@
           },
           wake_word: {
             enabled: getVal("wake_word-enabled"),
-            detection_method: getVal("wake_word-detection_method"),
-            max_local_active: getNum("wake_word-max_local_active"),
             wake_words: collectWakeWords(),
           },
           end_word: {

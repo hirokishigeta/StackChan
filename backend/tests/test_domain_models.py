@@ -10,7 +10,7 @@ from app.domain.bot.value_objects import ConnectionStatus
 from app.domain.settings.entities import BotSettings
 from app.domain.wakeword.entities import WakeWordConfig
 from app.domain.wakeword.services import resolve_active_wake_words
-from app.domain.wakeword.value_objects import DetectionMethod, WakeWordEntry
+from app.domain.wakeword.value_objects import WakeWordEntry
 
 
 def test_bot_is_frozen() -> None:
@@ -45,23 +45,9 @@ def test_wake_word_entry_rejects_threshold_out_of_range() -> None:
         WakeWordEntry(id="ww-x", phrase="hello", threshold=1.5)
 
 
-def test_resolve_active_wake_words_caps_local_detection() -> None:
+def test_resolve_active_wake_words_returns_all_enabled() -> None:
     words = tuple(WakeWordEntry(id=f"ww-{i}", phrase=f"word {i}", enabled=True) for i in range(5))
-    config = WakeWordConfig(
-        detection_method=DetectionMethod.LOCAL,
-        max_local_active=3,
-        wake_words=words,
-    )
-    assert len(resolve_active_wake_words(config)) == 3
-
-
-def test_resolve_active_wake_words_backend_uncapped() -> None:
-    words = tuple(WakeWordEntry(id=f"ww-{i}", phrase=f"word {i}", enabled=True) for i in range(5))
-    config = WakeWordConfig(
-        detection_method=DetectionMethod.BACKEND,
-        max_local_active=3,
-        wake_words=words,
-    )
+    config = WakeWordConfig(wake_words=words)
     assert len(resolve_active_wake_words(config)) == 5
 
 
@@ -70,6 +56,6 @@ def test_resolve_active_wake_words_excludes_disabled() -> None:
         WakeWordEntry(id="ww-1", phrase="a", enabled=True),
         WakeWordEntry(id="ww-2", phrase="b", enabled=False),
     )
-    config = WakeWordConfig(detection_method=DetectionMethod.LOCAL, wake_words=words)
+    config = WakeWordConfig(wake_words=words)
     active = resolve_active_wake_words(config)
     assert [w.id for w in active] == ["ww-1"]

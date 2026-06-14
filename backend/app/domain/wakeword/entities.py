@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .value_objects import DetectionMethod, EndWordEntry, WakeWordEntry
+from .value_objects import EndWordEntry, WakeWordEntry
 
 # Default end-of-conversation phrases (ADR-0016). Single source of truth: the
 # per-device ``EndWordConfig`` default below and the global fallback list in
@@ -34,12 +34,15 @@ DEFAULT_WAKE_WORDS: tuple[WakeWordEntry, ...] = (
 
 @dataclass(frozen=True)
 class WakeWordConfig:
-    """Wake word configuration. Supports multiple wake words (design-spec §8.1)."""
+    """Wake word configuration. Supports multiple wake words (design-spec §8.1).
+
+    Backend detection is gated by ``AppSettings.wake_word_gate_enabled`` and
+    on-device wake uses a fixed compiled model, so the legacy ``detection_method``
+    / ``max_local_active`` knobs were unused and have been removed (ADR-0017).
+    ``enabled`` is retained for the per-device wake-word toggle.
+    """
 
     enabled: bool = True
-    detection_method: DetectionMethod = DetectionMethod.LOCAL
-    # Max wake words simultaneously active on the device side (design-spec §8.1).
-    max_local_active: int = 3
     wake_words: tuple[WakeWordEntry, ...] = field(default_factory=lambda: DEFAULT_WAKE_WORDS)
 
 

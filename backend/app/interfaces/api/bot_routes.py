@@ -65,7 +65,6 @@ def get_wakeword(
     active = resolve_active_wake_words(config)
     return WakeWordResponse(
         enabled=config.enabled,
-        detection_method=config.detection_method.value,
         wake_words=[
             WakeWordEntrySchema(
                 id=w.id,
