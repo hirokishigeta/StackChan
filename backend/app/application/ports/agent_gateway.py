@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 
 from app.domain.agent.entities import AgentProfile
 from app.domain.agent.value_objects import AgentReply, ProactiveEvent
+
+# Called by a gateway with a short, human-readable status label (e.g.
+# "🔧 Web検索を実行中…") while it works, so the caller can surface tool/thinking
+# progress to the device mid-turn. Streaming gateways (Hermes) call it; others
+# ignore it.
+ProgressCallback = Callable[[str], Awaitable[None]]
 
 
 class AgentError(RuntimeError):
@@ -34,8 +41,14 @@ class AgentGateway(ABC):
         message: str,
         profile: AgentProfile,
         context: dict[str, object] | None = None,
+        progress_cb: ProgressCallback | None = None,
     ) -> AgentReply:
-        """Run one user-driven agent turn and return its reply (§11.3)."""
+        """Run one user-driven agent turn and return its reply (§11.3).
+
+        The gateway MAY call ``progress_cb`` with a short human-readable status
+        label while working (e.g. while a tool is running). Non-streaming
+        gateways ignore it.
+        """
         raise NotImplementedError
 
     @abstractmethod

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from app.application.ports.agent_gateway import AgentGateway
+from app.application.ports.agent_gateway import AgentGateway, ProgressCallback
 from app.domain.agent.entities import AgentProfile
 from app.domain.agent.value_objects import AgentReply, ProactiveEvent
 
@@ -63,9 +63,15 @@ class HermesAgentGateway(AgentGateway):
         message: str,
         profile: AgentProfile,
         context: dict[str, object] | None = None,
+        progress_cb: ProgressCallback | None = None,
     ) -> AgentReply:
-        return await self._inner.chat(
-            message=message, profile=self._delegated(profile), context=context
+        delegated = self._delegated(profile)
+        if progress_cb is None:
+            # No progress sink: keep the simpler non-streaming path.
+            return await self._inner.chat(message=message, profile=delegated, context=context)
+        # Stream so Hermes tool/thinking steps reach the device mid-turn.
+        return await self._inner.chat_streaming(
+            message=message, profile=delegated, context=context, progress_cb=progress_cb
         )
 
     async def proactive(

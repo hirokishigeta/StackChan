@@ -21,7 +21,7 @@ from typing import Any
 
 import httpx
 
-from app.application.ports.agent_gateway import AgentError, AgentGateway
+from app.application.ports.agent_gateway import AgentError, AgentGateway, ProgressCallback
 from app.domain.agent.entities import AgentProfile
 from app.domain.agent.value_objects import AgentAction, AgentReply, ProactiveEvent
 
@@ -83,10 +83,86 @@ class OpenAICompatibleGateway(AgentGateway):
         message: str,
         profile: AgentProfile,
         context: dict[str, object] | None = None,
+        progress_cb: ProgressCallback | None = None,
     ) -> AgentReply:
+        # progress_cb is ignored: this gateway is non-streaming.
         user_content = _augment_with_context(message, context)
         messages = self._build_messages(profile, user_content)
         return await self._complete(messages, profile)
+
+    async def chat_streaming(
+        self,
+        *,
+        message: str,
+        profile: AgentProfile,
+        context: dict[str, object] | None,
+        progress_cb: ProgressCallback,
+    ) -> AgentReply:
+        """Streaming variant: SSE-stream the completion, surfacing Hermes-style
+        ``hermes.tool.progress`` events as short status labels via ``progress_cb``.
+
+        Builds the same request as :meth:`chat` plus ``stream: true``. Normal
+        content chunks are accumulated and mapped to an :class:`AgentReply` with
+        the same parsing as the non-streaming path; tool-progress events are
+        translated to a human-readable label by :func:`_tool_label` and pushed
+        through ``progress_cb`` (de-duped so the same label is not spammed).
+        """
+        user_content = _augment_with_context(message, context)
+        messages = self._build_messages(profile, user_content)
+        model = profile.model_name or self._model
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": profile.temperature,
+            "max_tokens": profile.max_tokens,
+            "stream": True,
+        }
+        content_parts: list[str] = []
+        pending_event: str | None = None
+        last_label: str | None = None
+        try:
+            async with self._client_factory() as client:
+                async with client.stream("POST", "/chat/completions", json=payload) as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if not line:
+                            pending_event = None
+                            continue
+                        if line.startswith("event:"):
+                            pending_event = line[len("event:") :].strip()
+                            continue
+                        if not line.startswith("data:"):
+                            continue
+                        data = line[len("data:") :].strip()
+                        if data == "[DONE]":
+                            break
+                        try:
+                            obj = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
+                        if pending_event == "hermes.tool.progress":
+                            label = _tool_label(obj if isinstance(obj, dict) else {})
+                            if label != last_label:
+                                last_label = label
+                                await progress_cb(label)
+                            pending_event = None
+                            continue
+                        try:
+                            piece = obj["choices"][0]["delta"].get("content", "")
+                        except (KeyError, IndexError, TypeError):
+                            piece = ""
+                        if piece:
+                            content_parts.append(piece)
+        except httpx.TimeoutException as exc:
+            raise AgentError(f"agent request timed out: {exc}") from exc
+        except httpx.HTTPStatusError as exc:
+            raise AgentError(
+                f"agent returned HTTP {exc.response.status_code}: {exc.response.text[:200]}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise AgentError(f"agent request failed: {exc}") from exc
+
+        return _content_to_reply("".join(content_parts))
 
     async def proactive(
         self,
@@ -157,6 +233,17 @@ def _map_completion(body: dict[str, Any]) -> AgentReply:
     if not isinstance(content, str):
         raise AgentError("completion message content was not a string")
 
+    return _content_to_reply(content)
+
+
+def _content_to_reply(content: str) -> AgentReply:
+    """Map a completion's text content to an AgentReply (§11.3).
+
+    Shared by the non-streaming (:func:`_map_completion`) and streaming
+    (:meth:`OpenAICompatibleGateway.chat_streaming`) paths: structured JSON is
+    parsed when present, otherwise the text is used verbatim with a synthesised
+    expression.
+    """
     structured = _try_parse_structured(content)
     if structured is not None:
         return structured
@@ -169,6 +256,31 @@ def _map_completion(body: dict[str, Any]) -> AgentReply:
         emotion=emotion,
         actions=(AgentAction(type="set_expression", value=emotion),),
     )
+
+
+def _tool_label(obj: dict[str, Any]) -> str:
+    """Map a ``hermes.tool.progress`` event to a short Japanese status label.
+
+    ``tool_name`` varies across tools, so we match on substrings of its
+    lowercased form. ``"_thinking"`` / empty names map to a generic thinking
+    status; unknown tools fall back to naming the tool.
+    """
+    raw = obj.get("tool_name")
+    name = str(raw) if raw is not None else ""
+    lowered = name.lower()
+    if not lowered or lowered == "_thinking":
+        return "🤔 考えています…"
+    if any(k in lowered for k in ("search", "web", "browse")):
+        return "🔧 Web検索を実行中…"
+    if any(k in lowered for k in ("read", "file", "cat", "open")):
+        return "🔧 ファイルを読んでいます…"
+    if any(k in lowered for k in ("write", "edit")):
+        return "🔧 ファイルを編集中…"
+    if any(k in lowered for k in ("shell", "bash", "exec", "command", "terminal")):
+        return "🔧 コマンドを実行中…"
+    if any(k in lowered for k in ("python", "code")):
+        return "🔧 コードを実行中…"
+    return f"🔧 {name} を実行中…"
 
 
 def _try_parse_structured(content: str) -> AgentReply | None:

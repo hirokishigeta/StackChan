@@ -502,12 +502,43 @@ class BotAudioHandler:
         await ws.send_json({"type": "stt", "text": user_text})
         logger.info("agent_turn user=%r", user_text)
         profile = self._resolve_profile(session.device_id)
+        # Half-duplex: mark speaking across the whole tts.start..stop window so
+        # the bot's own voice (no device AEC) is not heard back as input. We open
+        # this window BEFORE the agent call so that tool-progress labels can be
+        # surfaced (as display-only sentence_start text) while the agent works.
+        # On exit reset VAD/buffer so the in-flight tail (captured just before
+        # the gate closed) cannot immediately re-finalize once we re-open the mic.
+        session.speaking = True
+        # tts.start opens the speaking window. Per sentence later: sentence_start
+        # text -> (downlink Opus audio frames) -> ... -> tts.stop.
+        await ws.send_json({"type": "tts", "state": "start"})
+
+        async def progress_cb(label: str) -> None:
+            # Display-only status (e.g. "🔧 Web検索を実行中…"): reuse the
+            # sentence_start message with NO audio frames after it, so the device
+            # shows it but never speaks it. Best-effort: a failure here must never
+            # break the turn.
+            if session.aborted:
+                return
+            try:
+                await ws.send_json({"type": "tts", "state": "sentence_start", "text": label})
+            except Exception:  # noqa: BLE001 - progress is non-critical
+                logger.debug("progress_cb send failed (ignored)", exc_info=True)
+
         try:
-            reply = await self._agent.chat(message=user_text, profile=profile, context=None)
+            reply = await self._agent.chat(
+                message=user_text, profile=profile, context=None, progress_cb=progress_cb
+            )
         except AgentError as exc:
             # Safe fallback (ADR-0005 / design-spec §13): keep the loop alive.
+            # tts.start was already sent above, so we MUST send tts.stop here and
+            # clear the speaking flag so the device never sticks in Speaking.
             logger.warning("agent error -> safe fallback (LLM未設定/失敗?): %s", exc)
             await ws.send_json({"type": "tts", "state": "stop"})
+            session.speaking = False
+            session.vad.reset()
+            session.pcm_buffer = bytearray()
+            session.last_activity = asyncio.get_running_loop().time()
             return
         # Reduce the reply to speech-only text: strip URLs / markdown / code /
         # paths the agent (e.g. HermesAgent) may include but that are noise when
@@ -516,22 +547,16 @@ class BotAudioHandler:
         spoken_text = sanitize_for_speech(reply.text)
         logger.info("reply emotion=%s text=%r spoken=%r", reply.emotion, reply.text, spoken_text)
         if session.aborted:
+            session.speaking = False
+            session.vad.reset()
+            session.pcm_buffer = bytearray()
+            session.last_activity = asyncio.get_running_loop().time()
             return
         # Engaged (conversing) -> device shows the "in conversation" color.
         await self._send_engagement_state(ws, session, engaged=True)
         # Emotion -> expression (xiaozhi `llm`, §2.2 -> firmware SetEmotion).
         await ws.send_json({"type": "llm", "emotion": reply.emotion})
-        # Half-duplex: mark speaking across the whole tts.start..stop window so
-        # the bot's own voice (no device AEC) is not heard back as input. On exit
-        # reset VAD/buffer so the in-flight tail (captured just before the gate
-        # closed) cannot immediately re-finalize once we re-open the mic.
-        session.speaking = True
         try:
-            # tts.start -> per sentence: sentence_start text -> (downlink Opus
-            # audio frames) -> ... -> tts.stop. Streaming one sentence at a time
-            # keeps each chunk short (see _split_sentences) so a long reply does
-            # not become one huge playback that starves the device decoder.
-            await ws.send_json({"type": "tts", "state": "start"})
             sentences = _split_sentences(spoken_text) or [spoken_text]
             await self._stream_reply(ws, session, sentences, reply.emotion)
             await ws.send_json({"type": "tts", "state": "stop"})

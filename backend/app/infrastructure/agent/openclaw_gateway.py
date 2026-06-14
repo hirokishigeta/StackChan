@@ -9,7 +9,7 @@ place and only the transport is missing.
 
 from __future__ import annotations
 
-from app.application.ports.agent_gateway import AgentGateway
+from app.application.ports.agent_gateway import AgentGateway, ProgressCallback
 from app.domain.agent.entities import AgentProfile
 from app.domain.agent.value_objects import AgentAction, AgentReply, ProactiveEvent
 
@@ -26,6 +26,7 @@ class OpenClawGateway(AgentGateway):
         message: str,
         profile: AgentProfile,
         context: dict[str, object] | None = None,
+        progress_cb: ProgressCallback | None = None,
     ) -> AgentReply:
         return AgentReply(
             text=_STUB_NOTICE,

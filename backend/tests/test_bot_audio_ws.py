@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from app.application.ports.agent_gateway import AgentError, AgentGateway
+from app.application.ports.agent_gateway import AgentError, AgentGateway, ProgressCallback
 from app.application.ports.audio_decoder import AudioDecodeError, AudioDecoder
 from app.application.ports.audio_encoder import AudioEncoder
 from app.application.ports.settings_repository import SettingsRepository
@@ -92,7 +92,12 @@ class _FakeAgent(AgentGateway):
         self.messages: list[str] = []
 
     async def chat(
-        self, *, message: str, profile: AgentProfile, context: dict[str, object] | None = None
+        self,
+        *,
+        message: str,
+        profile: AgentProfile,
+        context: dict[str, object] | None = None,
+        progress_cb: ProgressCallback | None = None,
     ) -> AgentReply:
         self.messages.append(message)
         return self.reply
@@ -103,7 +108,12 @@ class _FakeAgent(AgentGateway):
 
 class _RaisingAgent(AgentGateway):
     async def chat(
-        self, *, message: str, profile: AgentProfile, context: dict[str, object] | None = None
+        self,
+        *,
+        message: str,
+        profile: AgentProfile,
+        context: dict[str, object] | None = None,
+        progress_cb: ProgressCallback | None = None,
     ) -> AgentReply:
         raise AgentError("down")
 
@@ -208,8 +218,8 @@ def test_listen_to_stt_llm_tts_stream(
         ws.send_json({"type": "listen", "state": "stop"})
 
         stt = ws.receive_json()
-        llm = ws.receive_json()
         tts_start = ws.receive_json()
+        llm = ws.receive_json()
         tts_sentence = ws.receive_json()
         tts_stop = ws.receive_json()
 
@@ -252,6 +262,7 @@ def test_listen_detect_starts_turn_from_text(
         ws.receive_json()
         ws.send_json({"type": "listen", "state": "detect", "text": "スタックチャン"})
         stt = ws.receive_json()
+        ws.receive_json()  # tts.start (opened before the agent call)
         llm = ws.receive_json()
     assert stt == {"type": "stt", "text": "スタックチャン"}
     assert llm == {"type": "llm", "emotion": "curious"}
@@ -300,8 +311,8 @@ def test_detect_after_abort_emits_full_response_stream(
         assert ws.receive_json() == {"type": "tts", "state": "stop"}
         ws.send_json({"type": "listen", "state": "detect", "text": "ねえ"})
         assert ws.receive_json() == {"type": "stt", "text": "ねえ"}
-        assert ws.receive_json() == {"type": "llm", "emotion": "happy"}
         assert ws.receive_json() == {"type": "tts", "state": "start"}
+        assert ws.receive_json() == {"type": "llm", "emotion": "happy"}
         assert ws.receive_json() == {"type": "tts", "state": "sentence_start", "text": "やあ"}
         assert ws.receive_json() == {"type": "tts", "state": "stop"}
 
@@ -346,8 +357,12 @@ def test_agent_failure_emits_tts_stop(
         ws.receive_json()
         ws.send_json({"type": "listen", "state": "detect", "text": "やあ"})
         stt = ws.receive_json()
+        start = ws.receive_json()
         stop = ws.receive_json()
     assert stt == {"type": "stt", "text": "やあ"}
+    # tts.start now opens the speaking window before the agent call; on an agent
+    # failure the fallback path must still close it with tts.stop.
+    assert start == {"type": "tts", "state": "start"}
     assert stop == {"type": "tts", "state": "stop"}
 
 
@@ -390,8 +405,8 @@ def test_vad_auto_mode_finalizes_on_trailing_silence(
             ws.send_bytes(_silent_frame())
         # No `listen stop` sent: the reply stream proves VAD finalized.
         assert ws.receive_json() == {"type": "stt", "text": "やっほー"}
-        assert ws.receive_json() == {"type": "llm", "emotion": "happy"}
         assert ws.receive_json() == {"type": "tts", "state": "start"}
+        assert ws.receive_json() == {"type": "llm", "emotion": "happy"}
         assert ws.receive_json() == {"type": "tts", "state": "sentence_start", "text": "やっほー！"}
         assert ws.receive_json() == {"type": "tts", "state": "stop"}
     assert agent.messages == ["やっほー"]
@@ -438,7 +453,7 @@ def test_vad_auto_mode_keeps_listening_for_next_utterance(
             ws.send_bytes(_loud_frame())
         for _ in range(15):
             ws.send_bytes(_silent_frame())
-        for expected in ("stt", "llm", "tts", "tts", "tts"):
+        for expected in ("stt", "tts", "llm", "tts", "tts"):
             assert ws.receive_json()["type"] == expected
 
     with _connect(client) as ws:
@@ -472,7 +487,7 @@ def test_manual_mode_does_not_use_vad_and_finalizes_on_stop(
             ws.send_bytes(_silent_frame())
         ws.send_json({"type": "listen", "state": "stop"})  # only this finalizes
         assert ws.receive_json() == {"type": "stt", "text": "マニュアル"}
-        for expected in ("llm", "tts", "tts", "tts"):
+        for expected in ("tts", "llm", "tts", "tts"):
             assert ws.receive_json()["type"] == expected
     assert len(asr.received) == 1  # exactly one finalize, from listen stop
 
