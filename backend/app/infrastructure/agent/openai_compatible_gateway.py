@@ -36,7 +36,12 @@ _RESPONSE_FORMAT_INSTRUCTION = (
     "naturally finished — e.g. the user says goodbye/thanks-that's-all, or there "
     "is nothing left to do. Otherwise set it to false so we keep listening. "
     "When ending, give a brief, warm farewell and gently invite the user to call "
-    "you again by name if they need anything (例:「何かあったら呼んでね」)."
+    "you again by name if they need anything (例:「何かあったら呼んでね」). "
+    "IMPORTANT: the 'text' field is spoken aloud by a text-to-speech voice, so it "
+    "must read naturally when heard. Do NOT put URLs, web links, markdown, code "
+    "blocks, file paths, or raw tool output in 'text'. If a tool or source "
+    "returned such things, summarize the result in plain spoken Japanese instead "
+    "of reciting them. Keep 'text' to what a person would actually say out loud."
 )
 
 # Type of the injectable client factory: () -> AsyncClient.
