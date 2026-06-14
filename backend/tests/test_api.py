@@ -162,6 +162,41 @@ def test_settings_wake_words_roundtrip(client: TestClient) -> None:
     assert got[1]["enabled"] is False
 
 
+def test_settings_default_end_words_served(client: TestClient) -> None:
+    _register(client)
+    # A freshly registered device exposes the default per-device end-word list.
+    body = client.get("/api/settings/cores3-001").json()
+    end_words = body["end_word"]["end_words"]
+    assert len(end_words) >= 1
+    assert all(w["phrase"].strip() for w in end_words)
+
+
+def test_settings_put_rejects_empty_end_word_phrase(client: TestClient) -> None:
+    _register(client)
+    resp = client.put(
+        "/api/settings/cores3-001",
+        json={"end_word": {"end_words": [{"id": "ew-1", "phrase": "  "}]}},
+    )
+    assert resp.status_code == 422
+
+
+def test_settings_end_words_roundtrip(client: TestClient) -> None:
+    _register(client)
+    payload = {
+        "end_word": {
+            "end_words": [
+                {"id": "ew-a", "phrase": "もうおしまい", "enabled": True},
+                {"id": "ew-b", "phrase": "また今度", "enabled": False},
+            ]
+        }
+    }
+    put = client.put("/api/settings/cores3-001", json=payload)
+    assert put.status_code == 200
+    got = client.get("/api/settings/cores3-001").json()["end_word"]["end_words"]
+    assert [w["phrase"] for w in got] == ["もうおしまい", "また今度"]
+    assert got[1]["enabled"] is False
+
+
 def test_settings_get_put_roundtrip(client: TestClient) -> None:
     _register(client)
     put = client.put(

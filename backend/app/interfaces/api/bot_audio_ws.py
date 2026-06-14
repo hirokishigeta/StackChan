@@ -111,6 +111,11 @@ class _Session:
     # timeout). ``last_activity`` is an event-loop monotonic clock reading
     # (asyncio loop.time()), NOT wall-clock time-of-day.
     wake_words: tuple[str, ...] = ()
+    # Per-device end-of-conversation phrases (ADR-0016), resolved once at listen
+    # start like ``wake_words``. Empty tuple means the device has no end words
+    # configured -> the end check falls back to the global
+    # ``AppSettings.conversation_end_words`` list.
+    end_words: tuple[str, ...] = ()
     engaged: bool = False
     last_activity: float = 0.0
     # Last engagement state signaled to the device (for the indicator color):
@@ -225,6 +230,7 @@ class BotAudioHandler:
             # WS connection already starts un-engaged (new _Session); staleness
             # is handled by the idle timeout in _wake_gate_allows (ADR-0014).
             session.wake_words = self._resolve_wake_words(session.device_id)
+            session.end_words = self._resolve_end_words(session.device_id)
             session.vad.reset()
         elif state == "stop":
             # Manual mode: the device tells us when the utterance ends. (Auto-mode
@@ -492,9 +498,11 @@ class BotAudioHandler:
             session.pcm_buffer = bytearray()
         # Conversation lifecycle (§7): end when the agent judged it over OR the
         # user said an end word. The bot has already spoken its (farewell) reply.
-        ended = reply.end_conversation or matches_wake_word(
-            user_text, tuple(self._settings.conversation_end_words)
-        )
+        # Per-device end words (ADR-0016) resolved at listen start; fall back to
+        # the global AppSettings list when the device has none configured so
+        # existing deployments behave unchanged until edited.
+        end_words = session.end_words or tuple(self._settings.conversation_end_words)
+        ended = reply.end_conversation or matches_wake_word(user_text, end_words)
         if ended:
             session.engaged = False  # disengage the wake gate (ADR-0014)
             if self._settings.wake_word_gate_enabled:
@@ -633,6 +641,20 @@ class BotAudioHandler:
         if settings is None:
             return ()
         return tuple(w.phrase for w in settings.wake_word.wake_words if w.enabled)
+
+    def _resolve_end_words(self, device_id: str) -> tuple[str, ...]:
+        """Enabled end-of-conversation phrases for the device (ADR-0016).
+
+        Returns the phrases of the device's enabled end-word entries from its
+        stored BotSettings (empty when no settings or none enabled). Resolved
+        once at listen start, mirroring ``_resolve_wake_words``. The caller
+        falls back to the global ``AppSettings.conversation_end_words`` when this
+        is empty so existing deployments are unaffected until edited.
+        """
+        settings = self._repository.get_settings(device_id)
+        if settings is None:
+            return ()
+        return tuple(w.phrase for w in settings.end_word.end_words if w.enabled)
 
 
 @router.websocket("/{device_id}/audio")

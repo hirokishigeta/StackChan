@@ -16,7 +16,7 @@ from app.domain.vision.entities import (
     VisionRecognitionConfig,
     VisionStreamPolicy,
 )
-from app.domain.wakeword.entities import WakeWordConfig
+from app.domain.wakeword.entities import EndWordConfig, WakeWordConfig
 
 from .value_objects import DisplaySettings
 
@@ -34,6 +34,7 @@ class BotSettings:
     attention: AttentionDetectionConfig = field(default_factory=AttentionDetectionConfig)
     proactive_talk: ProactiveTalkConfig = field(default_factory=ProactiveTalkConfig)
     wake_word: WakeWordConfig = field(default_factory=WakeWordConfig)
+    end_word: EndWordConfig = field(default_factory=EndWordConfig)
     display: DisplaySettings = field(default_factory=DisplaySettings)
 
     @classmethod

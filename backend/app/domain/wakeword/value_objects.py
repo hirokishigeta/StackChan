@@ -37,6 +37,26 @@ class WakeWordEntry:
             raise ValueError(f"wake word threshold must be within [0, 1], got {self.threshold!r}")
 
 
+@dataclass(frozen=True)
+class EndWordEntry:
+    """A single end-of-conversation word (ADR-0016).
+
+    While the backend wake gate is engaged, an utterance containing any enabled
+    end word ends the conversation and returns the device to wake-waiting
+    (ADR-0014). ``phrase`` must be a non-empty, non-whitespace string. Matched on
+    the STT transcript text via :func:`matches_wake_word` (arbitrary Japanese,
+    no extra model — same matching as wake words).
+    """
+
+    id: str
+    phrase: str
+    enabled: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.phrase or not self.phrase.strip():
+            raise ValueError("end word phrase must not be empty")
+
+
 def _normalize_for_match(text: str) -> str:
     """Normalize a phrase for backend wake-word matching.
 

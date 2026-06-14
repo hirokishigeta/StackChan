@@ -11,6 +11,10 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Shared single source of truth for the default JP end-word list (ADR-0016).
+# config may reference domain (domain depends on nothing, so there is no cycle).
+from app.domain.wakeword.entities import DEFAULT_END_WORD_PHRASES
+
 
 class AppSettings(BaseSettings):
     """Runtime settings, overridable via environment variables.
@@ -137,17 +141,9 @@ class AppSettings(BaseSettings):
     # these ends the conversation (in addition to the agent's own end_conversation
     # judgment). The bot gives a brief farewell, then disengages and returns to
     # wake-waiting (next turn needs the wake word again). Matched on STT text.
-    conversation_end_words: list[str] = [
-        "ばいばい",
-        "バイバイ",
-        "またね",
-        "じゃあね",
-        "おやすみ",
-        "もういいよ",
-        "もう大丈夫",
-        "終わりで",
-        "またあとで",
-    ]
+    # This is the GLOBAL fallback used when a device has no per-device end words
+    # configured (ADR-0016); the per-device list is the primary source.
+    conversation_end_words: list[str] = list(DEFAULT_END_WORD_PHRASES)
 
     # Downlink (server -> device) audio_params returned in the server hello.
     # These values are negotiated so firmware (#5) can rely on them; the
