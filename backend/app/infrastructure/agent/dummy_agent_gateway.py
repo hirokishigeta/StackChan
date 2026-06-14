@@ -7,7 +7,7 @@ xiaozhi-compatible messages are bridged to the design-spec §11 API.
 
 from __future__ import annotations
 
-from app.application.ports.agent_gateway import AgentGateway
+from app.application.ports.agent_gateway import AgentGateway, ProgressCallback
 from app.domain.agent.entities import AgentProfile
 from app.domain.agent.value_objects import AgentAction, AgentReply, ProactiveEvent
 
@@ -21,6 +21,7 @@ class DummyAgentGateway(AgentGateway):
         message: str,
         profile: AgentProfile,
         context: dict[str, object] | None = None,
+        progress_cb: ProgressCallback | None = None,
     ) -> AgentReply:
         return AgentReply(
             text="こんにちは、今日は何をしますか？",

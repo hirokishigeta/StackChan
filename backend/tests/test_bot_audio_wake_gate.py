@@ -107,10 +107,11 @@ def test_gate_engages_on_wake_word_and_runs_full_flow(
         ws.send_bytes(b"\x00" * 320)
         ws.send_json({"type": "listen", "state": "stop"})
         assert ws.receive_json() == {"type": "stt", "text": "ねえスタックチャン、元気？"}
-        # Engaging sends the engagement-state signal (for the indicator color).
+        # tts.start opens the speaking window before the agent call (so tool
+        # progress can be surfaced), then the engagement signal + emotion.
+        assert ws.receive_json() == {"type": "tts", "state": "start"}
         assert ws.receive_json() == {"type": "wake", "state": "engaged"}
         assert ws.receive_json() == {"type": "llm", "emotion": "happy"}
-        assert ws.receive_json() == {"type": "tts", "state": "start"}
         assert ws.receive_json()["state"] == "sentence_start"
         assert ws.receive_json() == {"type": "tts", "state": "stop"}
     assert agent.messages == ["ねえスタックチャン、元気？"]  # full utterance kept
@@ -132,14 +133,14 @@ def test_once_engaged_following_non_wake_utterance_is_processed(
         ws.send_bytes(b"\x00" * 320)
         ws.send_json({"type": "listen", "state": "stop"})
         # First turn also emits the engagement signal ("wake") right after stt.
-        for expected in ("stt", "wake", "llm", "tts", "tts", "tts"):
+        for expected in ("stt", "tts", "wake", "llm", "tts", "tts"):
             assert ws.receive_json()["type"] == expected
         # Second utterance has no wake word but should be processed (engaged).
         asr.text = "それで、続きの話なんだけど"
         ws.send_bytes(b"\x00" * 320)
         ws.send_json({"type": "listen", "state": "stop"})
         assert ws.receive_json() == {"type": "stt", "text": "それで、続きの話なんだけど"}
-        for expected in ("llm", "tts", "tts", "tts"):
+        for expected in ("tts", "llm", "tts", "tts"):
             assert ws.receive_json()["type"] == expected
     assert agent.messages == ["スタックチャン おはよう", "それで、続きの話なんだけど"]
 
@@ -165,14 +166,14 @@ def test_engaged_session_ends_on_per_device_end_word(
         # First utterance engages.
         ws.send_bytes(b"\x00" * 320)
         ws.send_json({"type": "listen", "state": "stop"})
-        for expected in ("stt", "wake", "llm", "tts", "tts", "tts"):
+        for expected in ("stt", "tts", "wake", "llm", "tts", "tts"):
             assert ws.receive_json()["type"] == expected
         # Second utterance contains the per-device end word -> conversation ends.
         asr.text = "ありがとう、もうおしまい"
         ws.send_bytes(b"\x00" * 320)
         ws.send_json({"type": "listen", "state": "stop"})
         assert ws.receive_json() == {"type": "stt", "text": "ありがとう、もうおしまい"}
-        for expected in ("llm", "tts", "tts", "tts"):
+        for expected in ("tts", "llm", "tts", "tts"):
             assert ws.receive_json()["type"] == expected
         # Ending returns the device to wake-waiting (not a listen stop).
         assert ws.receive_json() == {"type": "wake", "state": "waiting"}
@@ -195,14 +196,14 @@ def test_engaged_session_falls_back_to_global_end_words(
         ws.send_json({"type": "listen", "state": "start", "mode": "manual"})
         ws.send_bytes(b"\x00" * 320)
         ws.send_json({"type": "listen", "state": "stop"})
-        for expected in ("stt", "wake", "llm", "tts", "tts", "tts"):
+        for expected in ("stt", "tts", "wake", "llm", "tts", "tts"):
             assert ws.receive_json()["type"] == expected
         # "ばいばい" is in the default global conversation_end_words list.
         asr.text = "じゃあね、ばいばい"
         ws.send_bytes(b"\x00" * 320)
         ws.send_json({"type": "listen", "state": "stop"})
         assert ws.receive_json() == {"type": "stt", "text": "じゃあね、ばいばい"}
-        for expected in ("llm", "tts", "tts", "tts"):
+        for expected in ("tts", "llm", "tts", "tts"):
             assert ws.receive_json()["type"] == expected
         assert ws.receive_json() == {"type": "wake", "state": "waiting"}
 
@@ -229,7 +230,7 @@ def test_gate_corrects_mistranscribed_wake_word_for_agent(
         ws.send_json({"type": "listen", "state": "stop"})
         # The corrected text is what flows downstream (stt + agent).
         assert ws.receive_json() == {"type": "stt", "text": "ベルちゃん、こんにちは"}
-        for expected in ("wake", "llm", "tts", "tts", "tts"):
+        for expected in ("tts", "wake", "llm", "tts", "tts"):
             assert ws.receive_json()["type"] == expected
     # The agent sees the corrected canonical name.
     assert agent.messages == ["ベルちゃん、こんにちは"]
@@ -263,7 +264,7 @@ def test_gate_engages_on_fuzzy_mistranscription_and_corrects(
         ws.send_json({"type": "listen", "state": "stop"})
         # Corrected canonical text flows downstream (stt + agent).
         assert ws.receive_json() == {"type": "stt", "text": "ベルちゃん、こんにちは"}
-        for expected in ("wake", "llm", "tts", "tts", "tts"):
+        for expected in ("tts", "wake", "llm", "tts", "tts"):
             assert ws.receive_json()["type"] == expected
     assert agent.messages == ["ベルちゃん、こんにちは"]
 
@@ -312,6 +313,6 @@ def test_gate_disabled_processes_everything(
         ws.send_bytes(b"\x00" * 320)
         ws.send_json({"type": "listen", "state": "stop"})
         assert ws.receive_json() == {"type": "stt", "text": "ただのひとりごと"}
-        for expected in ("llm", "tts", "tts", "tts"):
+        for expected in ("tts", "llm", "tts", "tts"):
             assert ws.receive_json()["type"] == expected
     assert agent.messages == ["ただのひとりごと"]

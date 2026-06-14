@@ -15,7 +15,7 @@ from __future__ import annotations
 import struct
 from collections.abc import Callable
 
-from app.application.ports.agent_gateway import AgentGateway
+from app.application.ports.agent_gateway import AgentGateway, ProgressCallback
 from app.application.ports.audio_encoder import AudioEncodeError, AudioEncoder
 from app.application.ports.speech_recognizer import SpeechRecognizer
 from app.application.ports.speech_synthesizer import SpeechSynthesisError, SpeechSynthesizer
@@ -35,7 +35,12 @@ class _FakeAgent(AgentGateway):
         self.reply = reply
 
     async def chat(
-        self, *, message: str, profile: AgentProfile, context: dict[str, object] | None = None
+        self,
+        *,
+        message: str,
+        profile: AgentProfile,
+        context: dict[str, object] | None = None,
+        progress_cb: ProgressCallback | None = None,
     ) -> AgentReply:
         return self.reply
 
@@ -125,8 +130,8 @@ def test_tts_audio_frames_between_start_and_stop(
         ws.receive_json()  # server hello
         ws.send_json({"type": "listen", "state": "detect", "text": "ねえ"})
         assert ws.receive_json() == {"type": "stt", "text": "ねえ"}
-        assert ws.receive_json() == {"type": "llm", "emotion": "happy"}
         assert ws.receive_json() == {"type": "tts", "state": "start"}
+        assert ws.receive_json() == {"type": "llm", "emotion": "happy"}
         assert ws.receive_json() == {"type": "tts", "state": "sentence_start", "text": "げんき"}
         frames = _drain_to_stop(ws)
 
