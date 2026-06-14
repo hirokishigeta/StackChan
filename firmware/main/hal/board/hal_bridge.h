@@ -41,6 +41,8 @@ TouchPoint_t get_touch_point();
 bool is_xiaozhi_mode();
 void set_xiaozhi_mode(bool mode);
 void toggle_xiaozhi_chat_state();
+// End the current conversation and go back to wake-word waiting (screen tap).
+void request_wake_waiting();
 
 void disply_lvgl_lock();
 void disply_lvgl_unlock();

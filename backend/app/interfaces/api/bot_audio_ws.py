@@ -259,11 +259,18 @@ class BotAudioHandler:
                 await self._run_agent_turn(ws, session, text)
 
     async def _handle_abort(self, ws: WebSocket, session: _Session, msg: dict[str, Any]) -> None:
-        # Barge-in: drop in-progress audio and stop any speaking turn (§6).
+        # Barge-in / user cancel (e.g. screen tap): drop in-progress audio and
+        # stop any speaking turn (§6).
         session.aborted = True
         session.listening = False
         session.pcm_buffer = bytearray()
         await ws.send_json({"type": "tts", "state": "stop"})
+        # Also end the conversation and return to wake-waiting (ADR-0014): a
+        # tap means "we're done", so the next turn must re-say the wake word.
+        # In backend-wake/always-listen mode the device keeps streaming and
+        # re-arms via `listen start`; only the engagement is dropped here.
+        session.engaged = False
+        await self._send_engagement_state(ws, session, engaged=False)
 
     async def _handle_mcp(self, ws: WebSocket, session: _Session, msg: dict[str, Any]) -> None:
         # Echo MCP control payloads back as a well-formed mcp message so the
