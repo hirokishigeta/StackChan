@@ -85,8 +85,12 @@ class AppSettings(BaseSettings):
     sherpa_encoder_path: str = ""
     sherpa_decoder_path: str = ""
     sherpa_joiner_path: str = ""
+    # NeMo Parakeet (CTC) model: when set, the same sherpa-onnx recognizer loads
+    # via OfflineRecognizer.from_nemo_ctc(model=..., tokens=...) instead of the
+    # transducer (ADR-0018). Higher Japanese accuracy on the same runtime.
+    sherpa_nemo_model_path: str = ""
     sherpa_sample_rate: int = 16000
-    sherpa_num_threads: int = 1
+    sherpa_num_threads: int = 2
 
     # Uplink audio decoder (Opus -> PCM), resolved via a registry. Default is
     # "raw" (PCM pass-through) so the WS server runs without libopus; set
