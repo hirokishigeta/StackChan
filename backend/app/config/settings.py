@@ -190,6 +190,10 @@ class AppSettings(BaseSettings):
     opencv_face_cascade_path: str = ""
     opencv_scale_factor: float = 1.1
     opencv_min_neighbors: int = 5
+    # Debug: when set, /api/vision/detect writes each received image to this
+    # path (overwritten each call) so the camera feed can be inspected. Empty
+    # disables. For diagnostics only.
+    vision_debug_save_path: str = ""
 
     # TTS (downlink speech synthesis) provider, resolved via a registry. Default
     # is "dummy" so the process / make check run without heavy deps or models;
