@@ -42,6 +42,7 @@ from app.config.settings import AppSettings
 from app.di_container import container as container_module
 from app.domain.agent.entities import AgentProfile
 from app.domain.speech.entities import ConversationTurnConfig, SpeechRecognitionConfig
+from app.domain.speech.text_normalization import sanitize_for_speech
 from app.domain.speech.value_objects import AudioFormat
 from app.domain.wakeword.value_objects import canonicalize_wake_word, matches_wake_word
 from app.infrastructure.audio.resample import resample_pcm16
@@ -508,7 +509,12 @@ class BotAudioHandler:
             logger.warning("agent error -> safe fallback (LLM未設定/失敗?): %s", exc)
             await ws.send_json({"type": "tts", "state": "stop"})
             return
-        logger.info("reply emotion=%s text=%r", reply.emotion, reply.text)
+        # Reduce the reply to speech-only text: strip URLs / markdown / code /
+        # paths the agent (e.g. HermesAgent) may include but that are noise when
+        # read aloud (StackChan-side concern; the backend keeps the full text in
+        # its own memory). Used for both the on-screen sentence text and TTS.
+        spoken_text = sanitize_for_speech(reply.text)
+        logger.info("reply emotion=%s text=%r spoken=%r", reply.emotion, reply.text, spoken_text)
         if session.aborted:
             return
         # Engaged (conversing) -> device shows the "in conversation" color.
@@ -526,7 +532,7 @@ class BotAudioHandler:
             # keeps each chunk short (see _split_sentences) so a long reply does
             # not become one huge playback that starves the device decoder.
             await ws.send_json({"type": "tts", "state": "start"})
-            sentences = _split_sentences(reply.text) or [reply.text]
+            sentences = _split_sentences(spoken_text) or [spoken_text]
             await self._stream_reply(ws, session, sentences, reply.emotion)
             await ws.send_json({"type": "tts", "state": "stop"})
             # Post-roll cooldown: the device keeps playing its buffered audio for
