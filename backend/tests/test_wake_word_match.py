@@ -7,7 +7,11 @@ so it is tested directly with no I/O.
 
 from __future__ import annotations
 
-from app.domain.wakeword.value_objects import canonicalize_wake_word, matches_wake_word
+from app.domain.wakeword.value_objects import (
+    _levenshtein,
+    canonicalize_wake_word,
+    matches_wake_word,
+)
 
 
 def test_matches_japanese_phrase_as_substring() -> None:
@@ -84,3 +88,100 @@ def test_canonicalize_prefers_longest_phrase() -> None:
 
 def test_canonicalize_blank_canonical_is_noop() -> None:
     assert canonicalize_wake_word("レルちゃん", _WORDS, "") == "レルちゃん"
+
+
+# -- Levenshtein distance ----------------------------------------------------
+
+
+def test_levenshtein_identical_is_zero() -> None:
+    assert _levenshtein("ベルちゃん", "ベルちゃん") == 0
+
+
+def test_levenshtein_empty_operands() -> None:
+    assert _levenshtein("", "abc") == 3
+    assert _levenshtein("abc", "") == 3
+    assert _levenshtein("", "") == 0
+
+
+def test_levenshtein_single_substitution() -> None:
+    # ベルちゃん vs ベルちゃ子: one substitution at the tail.
+    assert _levenshtein("ベルちゃん", "ベルちゃ子") == 1
+    # The real-world garble "ねるちゃん" differs from "ベルちゃん" in TWO
+    # positions (ベ->ね AND katakana ル -> hiragana る), so it is distance 2.
+    assert _levenshtein("ベルちゃん", "ねるちゃん") == 2
+
+
+def test_levenshtein_insertion_and_deletion() -> None:
+    assert _levenshtein("kitten", "sitting") == 3
+    assert _levenshtein("abc", "ab") == 1
+    assert _levenshtein("ab", "abc") == 1
+
+
+# -- Fuzzy wake matching (ADR-0018) ------------------------------------------
+
+_FUZZY_WAKE = ["ベルちゃん"]
+
+
+def test_fuzzy_matches_single_substitution_garble() -> None:
+    # ねるちゃん / ピルちゃん are dist 1; ピリちゃん is dist 2.
+    assert matches_wake_word("ねるちゃん、こんにちは", _FUZZY_WAKE, 2)
+    assert matches_wake_word("ピルちゃん", _FUZZY_WAKE, 2)
+    assert matches_wake_word("ピリちゃん", _FUZZY_WAKE, 2)
+
+
+def test_fuzzy_matches_garble_inside_longer_transcript() -> None:
+    assert matches_wake_word("ねえ、ねるちゃんって元気？", _FUZZY_WAKE, 2)
+
+
+def test_fuzzy_does_not_match_clearly_different_utterance() -> None:
+    assert not matches_wake_word("今日はいい天気だね", _FUZZY_WAKE, 2)
+    assert not matches_wake_word("おはようございます", _FUZZY_WAKE, 2)
+
+
+def test_fuzzy_disabled_when_max_dist_zero() -> None:
+    # Default behavior: exact/substring only, so a garble does not match.
+    assert not matches_wake_word("ねるちゃん", _FUZZY_WAKE, 0)
+    assert not matches_wake_word("ねるちゃん", _FUZZY_WAKE)  # default 0
+    # An exact occurrence still matches with fuzzy off.
+    assert matches_wake_word("ベルちゃん", _FUZZY_WAKE, 0)
+
+
+def test_short_phrases_stay_exact_no_fuzzy_false_trigger() -> None:
+    # len<=2 phrases ("ベル"/"エル") must NOT fuzzy-match a 1-edit neighbor,
+    # otherwise they would false-trigger on almost anything.
+    assert not matches_wake_word("ねる", ["ベル"], 2)
+    assert not matches_wake_word("えり", ["エル"], 2)
+    # ...but an exact/substring hit still works for short phrases.
+    assert matches_wake_word("ベルだよ", ["ベル"], 2)
+
+
+def test_fuzzy_respects_length_scaled_tolerance() -> None:
+    # 3-char phrase ("ベルこ") tolerates only dist 1, not dist 2.
+    assert matches_wake_word("ベルご", ["ベルこ"], 2)  # dist 1 -> match
+    assert not matches_wake_word("ねるこ", ["ベルこ"], 2)  # dist 2 on a 3-char phrase
+
+
+def test_canonicalize_rewrites_fuzzy_garble_to_canonical() -> None:
+    # No exact variant configured; only the canonical. A fuzzy garble is
+    # corrected to the canonical name for the LLM.
+    assert (
+        canonicalize_wake_word("ねるちゃん、こんにちは", _FUZZY_WAKE, "ベルちゃん", 2)
+        == "ベルちゃん、こんにちは"
+    )
+
+
+def test_canonicalize_fuzzy_mid_sentence() -> None:
+    assert (
+        canonicalize_wake_word("ねえ、ピルちゃんって元気？", _FUZZY_WAKE, "ベルちゃん", 2)
+        == "ねえ、ベルちゃんって元気？"
+    )
+
+
+def test_canonicalize_fuzzy_disabled_leaves_garble() -> None:
+    # max_dist=0 -> no fuzzy correction, garble passes through.
+    assert canonicalize_wake_word("ねるちゃん", _FUZZY_WAKE, "ベルちゃん", 0) == "ねるちゃん"
+
+
+def test_canonicalize_exact_wins_over_fuzzy() -> None:
+    # An exact configured variant is replaced even with fuzzy enabled.
+    assert canonicalize_wake_word("レルちゃん、やあ", _WORDS, _CANON, 2) == "ベルちゃん、やあ"
