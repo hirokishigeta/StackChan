@@ -215,10 +215,13 @@ class BotAudioHandler:
             # on VAD; real auto-mode devices always send mode:"auto" (§6).
             session.listen_mode = str(msg.get("mode", "manual"))
             session.turn = self._resolve_turn(session.device_id)
-            # Resolve the device's enabled wake words once per session and reset
-            # the gate so each new listen session starts un-engaged (ADR-0014).
+            # Resolve the device's enabled wake words. Do NOT reset `engaged`
+            # here: in always-listen mode the device sends `listen start` to
+            # re-arm after every utterance, so resetting would drop the
+            # conversation and force re-saying the wake word each turn. A fresh
+            # WS connection already starts un-engaged (new _Session); staleness
+            # is handled by the idle timeout in _wake_gate_allows (ADR-0014).
             session.wake_words = self._resolve_wake_words(session.device_id)
-            session.engaged = False
             session.vad.reset()
         elif state == "stop":
             # Manual mode: the device tells us when the utterance ends. (Auto-mode
