@@ -26,7 +26,7 @@ from app.domain.vision.entities import (
 )
 from app.domain.vision.value_objects import ProcessingLocation
 from app.domain.wakeword.entities import EndWordConfig, WakeWordConfig
-from app.domain.wakeword.value_objects import DetectionMethod, EndWordEntry, WakeWordEntry
+from app.domain.wakeword.value_objects import EndWordEntry, WakeWordEntry
 
 
 def _to_jsonable(value: Any) -> Any:
@@ -54,7 +54,6 @@ _ENUM_FIELDS: tuple[tuple[str, str, type[Enum]], ...] = (
     ("agent", "response_mode", ResponseMode),
     ("vision", "processing_location", ProcessingLocation),
     ("vision_stream", "processing_location", ProcessingLocation),
-    ("wake_word", "detection_method", DetectionMethod),
 )
 
 
@@ -171,14 +170,10 @@ def settings_from_dict(device_id: str, data: dict[str, Any]) -> BotSettings:
     )
 
     wake_raw = data.get("wake_word", {})
+    # ``detection_method`` / ``max_local_active`` were removed (ADR-0017); ignore
+    # them if present in older persisted rows (back-compat) rather than erroring.
     wake_word = WakeWordConfig(
         enabled=wake_raw.get("enabled", defaults.wake_word.enabled),
-        detection_method=_coerce_enum(
-            DetectionMethod,
-            wake_raw.get("detection_method", defaults.wake_word.detection_method.value),
-            defaults.wake_word.detection_method,
-        ),
-        max_local_active=wake_raw.get("max_local_active", defaults.wake_word.max_local_active),
         wake_words=tuple(
             WakeWordEntry(
                 id=w["id"],

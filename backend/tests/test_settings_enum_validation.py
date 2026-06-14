@@ -15,7 +15,6 @@ import pytest
 from app.domain.agent.value_objects import AgentType, ResponseMode
 from app.domain.settings.entities import BotSettings
 from app.domain.vision.value_objects import ProcessingLocation
-from app.domain.wakeword.value_objects import DetectionMethod
 from app.infrastructure.persistence.serialization import (
     settings_from_dict,
     settings_to_dict,
@@ -42,7 +41,10 @@ def test_settings_from_dict_unknown_enum_falls_back_to_default() -> None:
     data["agent"]["response_mode"] = "telepathy"
     data["vision"]["processing_location"] = "moon"
     data["vision_stream"]["processing_location"] = "moon"
+    # Legacy wake-word fields (removed in ADR-0017) are ignored on load, not
+    # errored, for back-compat with older persisted rows.
     data["wake_word"]["detection_method"] = "psychic"
+    data["wake_word"]["max_local_active"] = 99
 
     rebuilt = settings_from_dict("dev-1", data)
 
@@ -50,7 +52,7 @@ def test_settings_from_dict_unknown_enum_falls_back_to_default() -> None:
     assert rebuilt.agent.response_mode == defaults.agent.response_mode
     assert rebuilt.vision.processing_location == defaults.vision.processing_location
     assert rebuilt.vision_stream.processing_location == defaults.vision_stream.processing_location
-    assert rebuilt.wake_word.detection_method == defaults.wake_word.detection_method
+    assert not hasattr(rebuilt.wake_word, "detection_method")
 
 
 def test_get_settings_with_corrupt_db_enum_returns_defaults_not_500(
@@ -100,13 +102,17 @@ def test_put_invalid_enum_returns_422(client: TestClient) -> None:
     assert "agent.agent_type" in resp.json()["detail"]
 
 
-def test_put_invalid_detection_method_returns_422(client: TestClient) -> None:
+def test_put_legacy_detection_method_is_ignored_not_422(client: TestClient) -> None:
+    """``detection_method`` was removed (ADR-0017); it is no longer a validated
+    enum, so a PUT carrying it (e.g. from an old client) is accepted and the
+    field is simply dropped rather than rejected with 422."""
     _register(client)
     resp = client.put(
         "/api/settings/cores3-001",
         json={"wake_word": {"detection_method": "telepathic"}},
     )
-    assert resp.status_code == 422
+    assert resp.status_code == 200
+    assert "detection_method" not in resp.json()["wake_word"]
 
 
 def test_put_valid_enum_returns_200_and_applies(client: TestClient) -> None:
@@ -132,7 +138,6 @@ def test_validate_enum_inputs_accepts_valid_and_omitted() -> None:
         {
             "agent": {"response_mode": ResponseMode.STREAM.value},
             "vision": {"processing_location": ProcessingLocation.BACKEND.value},
-            "wake_word": {"detection_method": DetectionMethod.LOCAL.value},
         }
     )
 

@@ -207,6 +207,34 @@ def test_engaged_session_falls_back_to_global_end_words(
         assert ws.receive_json() == {"type": "wake", "state": "waiting"}
 
 
+def test_gate_corrects_mistranscribed_wake_word_for_agent(
+    audio_ws_client_factory: Callable[..., TestClient],
+) -> None:
+    """A mis-transcribed wake variant is rewritten to the canonical name (ADR-0017).
+
+    The device's wake list has the canonical "ベルちゃん" first plus the common
+    STT mishearing "レルちゃん". ASR returns the garbled variant, the gate still
+    matches, and the wake phrase is rewritten to the canonical name before the
+    turn is handed to the agent.
+    """
+    asr = _FakeAsr(text="レルちゃん、こんにちは")
+    agent = _FakeAgent()
+    client = _gate_client(audio_ws_client_factory, agent=agent, asr=asr)
+    _seed_wake_words("ベルちゃん", "レルちゃん")
+    with _connect(client) as ws:
+        ws.send_json(_HELLO)
+        ws.receive_json()
+        ws.send_json({"type": "listen", "state": "start", "mode": "manual"})
+        ws.send_bytes(b"\x00" * 320)
+        ws.send_json({"type": "listen", "state": "stop"})
+        # The corrected text is what flows downstream (stt + agent).
+        assert ws.receive_json() == {"type": "stt", "text": "ベルちゃん、こんにちは"}
+        for expected in ("wake", "llm", "tts", "tts", "tts"):
+            assert ws.receive_json()["type"] == expected
+    # The agent sees the corrected canonical name.
+    assert agent.messages == ["ベルちゃん、こんにちは"]
+
+
 def test_gate_disabled_processes_everything(
     audio_ws_client_factory: Callable[..., TestClient],
 ) -> None:

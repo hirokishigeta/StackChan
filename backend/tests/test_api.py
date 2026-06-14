@@ -90,8 +90,6 @@ def test_wakeword_endpoint(client: TestClient) -> None:
         json={
             "wake_word": {
                 "enabled": True,
-                "detection_method": "local",
-                "max_local_active": 3,
                 "wake_words": [
                     {"id": "ww-1", "phrase": "hello bot", "threshold": 0.7, "enabled": True},
                     {
@@ -110,7 +108,7 @@ def test_wakeword_endpoint(client: TestClient) -> None:
     assert resp.status_code == 200
     body = resp.json()
     assert body["enabled"] is True
-    assert body["detection_method"] == "local"
+    assert "detection_method" not in body
     assert len(body["wake_words"]) == 2
     assert body["wake_words"][0]["id"] == "ww-1"
 
@@ -148,7 +146,6 @@ def test_settings_wake_words_roundtrip(client: TestClient) -> None:
     payload = {
         "wake_word": {
             "enabled": True,
-            "detection_method": "local",
             "wake_words": [
                 {"id": "ww-a", "phrase": "おはよう", "threshold": 0.6, "enabled": True},
                 {"id": "ww-b", "phrase": "bye bot", "threshold": 0.8, "enabled": False},

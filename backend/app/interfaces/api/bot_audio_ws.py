@@ -43,7 +43,7 @@ from app.domain.agent.entities import AgentProfile
 from app.domain.agent.value_objects import AgentReply
 from app.domain.speech.entities import ConversationTurnConfig, SpeechRecognitionConfig
 from app.domain.speech.value_objects import AudioFormat
-from app.domain.wakeword.value_objects import matches_wake_word
+from app.domain.wakeword.value_objects import canonicalize_wake_word, matches_wake_word
 from app.infrastructure.audio.resample import resample_pcm16
 from app.infrastructure.transport.audio_frame_codec import (
     AudioFrameError,
@@ -111,6 +111,12 @@ class _Session:
     # timeout). ``last_activity`` is an event-loop monotonic clock reading
     # (asyncio loop.time()), NOT wall-clock time-of-day.
     wake_words: tuple[str, ...] = ()
+    # Canonical (correctly-spelled) wake word for this device: the first enabled
+    # wake phrase. When the gate matches a (possibly mis-transcribed) wake
+    # variant, the recognized text is rewritten to this canonical name before it
+    # reaches the agent so the LLM never sees a garbled name (ADR-0017). Empty
+    # when the device has no enabled wake words -> correction is skipped.
+    canonical_wake_word: str = ""
     # Per-device end-of-conversation phrases (ADR-0016), resolved once at listen
     # start like ``wake_words``. Empty tuple means the device has no end words
     # configured -> the end check falls back to the global
@@ -230,6 +236,9 @@ class BotAudioHandler:
             # WS connection already starts un-engaged (new _Session); staleness
             # is handled by the idle timeout in _wake_gate_allows (ADR-0014).
             session.wake_words = self._resolve_wake_words(session.device_id)
+            # Canonical = the first enabled wake phrase (the order in which the
+            # user listed them; the first is treated as the proper spelling).
+            session.canonical_wake_word = session.wake_words[0] if session.wake_words else ""
             session.end_words = self._resolve_end_words(session.device_id)
             session.vad.reset()
         elif state == "stop":
@@ -409,7 +418,22 @@ class BotAudioHandler:
             # listening so it doesn't wait for a reply.
             await ws.send_json({"type": "tts", "state": "stop"})
             return
-        await self._run_agent_turn(ws, session, result.text)
+        # Wake-word correction (ADR-0017): when the gate enabled and this turn
+        # actually contained a wake phrase (an engaging / contains-wake turn,
+        # not a pure engaged-continuation with no wake word), the phrase may be a
+        # mis-transcribed variant ("レルちゃん" for "ベルちゃん"). Rewrite it to
+        # the canonical name so the LLM sees the proper name. Continuation turns
+        # with no wake word are passed through unchanged.
+        agent_text = result.text
+        if (
+            self._settings.wake_word_gate_enabled
+            and session.canonical_wake_word
+            and matches_wake_word(result.text, session.wake_words)
+        ):
+            agent_text = canonicalize_wake_word(
+                result.text, session.wake_words, session.canonical_wake_word
+            )
+        await self._run_agent_turn(ws, session, agent_text)
 
     async def _send_engagement_state(
         self, ws: WebSocket, session: _Session, *, engaged: bool
