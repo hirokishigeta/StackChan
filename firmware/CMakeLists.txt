@@ -2,8 +2,14 @@
 # CMakeLists in this exact order for cmake to work correctly
 cmake_minimum_required(VERSION 3.16)
 
-set(PROJECT_VER "1.5.4")
+set(PROJECT_VER "1.6.0")
 add_definitions(-DFIRMWARE_VERSION=\"${PROJECT_VER}\")
+
+# StackChan: backend-side wake word. The device auto-listens and streams to the
+# PC backend, which decides engagement from the configured (Japanese) wake
+# words; the on-device wakenet no longer gates the conversation. Comment out to
+# revert to on-device "Hi StackChan" wake.
+add_definitions(-DCONFIG_STACKCHAN_BACKEND_WAKE=1)
 
 # Add this line to disable the specific warning
 add_compile_options(-Wno-missing-field-initializers)

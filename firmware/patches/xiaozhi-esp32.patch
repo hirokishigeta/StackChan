@@ -1,5 +1,5 @@
 diff --git a/main/application.cc b/main/application.cc
-index d69d43d..1bb5912 100644
+index d69d43d..5a797b4 100644
 --- a/main/application.cc
 +++ b/main/application.cc
 @@ -547,6 +547,16 @@ void Application::InitializeProtocol() {
@@ -83,7 +83,33 @@ index d69d43d..1bb5912 100644
  }
  
  void Application::Alert(const char* status, const char* message, const char* emotion, const std::string_view& sound) {
-@@ -915,6 +928,10 @@ void Application::HandleStateChangedEvent() {
+@@ -869,6 +882,25 @@ void Application::HandleStateChangedEvent() {
+             display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
+             audio_service_.EnableVoiceProcessing(false);
+             audio_service_.EnableWakeWordDetection(true);
++#ifdef CONFIG_STACKCHAN_BACKEND_WAKE
++            // Backend-side wake (StackChan): don't wait for an on-device wake
++            // word. Auto-start a listening session so the device streams to the
++            // backend, which decides engagement from the configured (Japanese)
++            // wake words. The auto-stop VAD ends each utterance -> idle -> this
++            // re-arms, so audio is sent mainly while the user is speaking.
++            Schedule([this]() {
++                if (GetDeviceState() != kDeviceStateIdle || protocol_ == nullptr) {
++                    return;
++                }
++                ListeningMode mode = GetDefaultListeningMode();
++                if (!protocol_->IsAudioChannelOpened()) {
++                    SetDeviceState(kDeviceStateConnecting);
++                    Schedule([this, mode]() { ContinueOpenAudioChannel(mode); });
++                } else {
++                    SetListeningMode(mode);
++                }
++            });
++#endif
+             break;
+         case kDeviceStateConnecting:
+             display->SetStatus(Lang::Strings::CONNECTING);
+@@ -915,6 +947,10 @@ void Application::HandleStateChangedEvent() {
                  audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
              }
              audio_service_.ResetDecoder();
