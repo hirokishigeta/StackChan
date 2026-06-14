@@ -179,6 +179,12 @@ class AppSettings(BaseSettings):
     # if used without these set. Irodori emits 48 kHz audio.
     irodori_model_path: str = ""
     irodori_reference_wav_path: str = ""
+    # Directory of pre-generated voice samples (one .wav = one selectable
+    # reference voice; ADR-0012). The dashboard lists these; selecting one fixes
+    # the cloned TTS timbre. ``~`` is expanded by the repository. The wavs are
+    # generated separately on the GPU host into this directory (no hard-coded
+    # paths; CLAUDE.md).
+    voice_samples_dir: str = "~/.stackchan/voice_samples"
     irodori_device: str = "cpu"
     irodori_sample_rate: int = 48000
     # Codec / precision for the Irodori InferenceRuntime (match infer.py argparse

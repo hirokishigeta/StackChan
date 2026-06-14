@@ -45,6 +45,8 @@ class SqliteServerSettingsRepository(ServerSettingsRepository):
                 tts_provider=data["tts_provider"],
                 irodori_caption=data["irodori_caption"],
                 irodori_base_style=data["irodori_base_style"],
+                # Back-compat: rows written before ADR-0012 have no key -> None.
+                voice_sample_id=data.get("voice_sample_id"),
             )
 
     def save_voice_override(self, voice: ServerVoiceSettings) -> None:
@@ -53,6 +55,7 @@ class SqliteServerSettingsRepository(ServerSettingsRepository):
                 "tts_provider": voice.tts_provider,
                 "irodori_caption": voice.irodori_caption,
                 "irodori_base_style": voice.irodori_base_style,
+                "voice_sample_id": voice.voice_sample_id,
             },
             ensure_ascii=False,
         )

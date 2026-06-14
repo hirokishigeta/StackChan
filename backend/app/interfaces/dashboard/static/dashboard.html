@@ -173,6 +173,18 @@
       .check label { margin: 0; }
       .check .hint { margin: 1px 0 0; }
 
+      /* ---- voice-sample picker ---- */
+      .vs-list { display: flex; flex-direction: column; gap: 8px; }
+      .vs-empty { color: var(--faint); font-size: 13px; padding: 6px 2px; }
+      .vs-item {
+        display: flex; align-items: center; gap: 10px;
+        background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px;
+      }
+      .vs-item.selected { border-color: var(--c, var(--accent)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--c, var(--accent)) 18%, transparent); }
+      .vs-item input[type="radio"] { width: 18px; height: 18px; accent-color: var(--c, var(--accent)); flex: none; }
+      .vs-item label { margin: 0; flex: 1; cursor: pointer; }
+      .vs-play { flex: none; }
+
       /* ---- sticky save bar ---- */
       footer.savebar {
         position: sticky; bottom: 0;
@@ -479,6 +491,11 @@
                   <label for="voice-irodori_caption">声の指示 (caption / VoiceDesign プロンプト)</label>
                   <p class="hint">声色を言葉で指定します（VoiceDesign）。例「明るいが静かめの少女の声。少し高めで、親しみやすく、楽しそうに話してください。」</p>
                   <textarea id="voice-irodori_caption" placeholder="明るいが静かめの少女の声…"></textarea>
+                </div>
+                <div class="field full">
+                  <label>声サンプル (リファレンス音声でクローン)</label>
+                  <p class="hint">あらかじめ生成された音声サンプルから 1 つ選ぶと、その声色を固定してクローンします。▶ で試聴できます。未選択なら caption / 既定のリファレンスを使用します。</p>
+                  <div id="voice-sample-list" class="vs-list"></div>
                 </div>
               </div>
             </div>
@@ -790,6 +807,73 @@
       }
 
       // ---- server voice settings ----
+      let voiceSamples = [];
+      let selectedSampleId = null;
+      let previewAudio = null;
+
+      function renderVoiceSamples() {
+        const host = $("voice-sample-list");
+        host.innerHTML = "";
+        if (!voiceSamples.length) {
+          const empty = document.createElement("div");
+          empty.className = "vs-empty";
+          empty.textContent = "利用可能な声サンプルがありません（GPU ホストで生成してください）。";
+          host.appendChild(empty);
+          return;
+        }
+        // A "(なし)" option to clear the selection (fall back to caption / default ref).
+        const items = [{ id: "", label: "（声サンプルを使わない）" }].concat(voiceSamples);
+        for (const s of items) {
+          const item = document.createElement("div");
+          item.className = "vs-item" + ((selectedSampleId || "") === s.id ? " selected" : "");
+          const radio = document.createElement("input");
+          radio.type = "radio";
+          radio.name = "voice-sample";
+          radio.id = `vs-${s.id || "none"}`;
+          radio.value = s.id;
+          radio.checked = (selectedSampleId || "") === s.id;
+          radio.addEventListener("change", () => {
+            selectedSampleId = s.id || null;
+            renderVoiceSamples();
+          });
+          const label = document.createElement("label");
+          label.htmlFor = radio.id;
+          label.textContent = s.label;
+          item.appendChild(radio);
+          item.appendChild(label);
+          if (s.id) {
+            const play = document.createElement("button");
+            play.type = "button";
+            play.className = "secondary vs-play";
+            play.textContent = "▶";
+            play.title = "試聴";
+            play.addEventListener("click", () => {
+              try {
+                if (previewAudio) previewAudio.pause();
+                previewAudio = new Audio(`/api/voice-samples/${encodeURIComponent(s.id)}/audio`);
+                previewAudio.play().catch((e) => toast("試聴できません: " + e.message, false));
+              } catch (e) {
+                toast("試聴できません: " + e.message, false);
+              }
+            });
+            item.appendChild(play);
+          }
+          host.appendChild(item);
+        }
+      }
+
+      async function loadVoiceSamples() {
+        try {
+          const resp = await fetch("/api/voice-samples");
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          voiceSamples = await resp.json();
+        } catch (e) {
+          voiceSamples = [];
+          toast("声サンプルの読み込み失敗: " + e.message, false);
+        }
+        renderVoiceSamples();
+      }
+
       async function loadVoice() {
         try {
           const resp = await fetch("/api/server-settings");
@@ -798,6 +882,8 @@
           setVal("voice-tts_provider", v.tts_provider);
           setVal("voice-irodori_caption", v.irodori_caption);
           setVal("voice-irodori_base_style", v.irodori_base_style);
+          selectedSampleId = v.voice_sample_id || null;
+          renderVoiceSamples();
         } catch (e) {
           toast("音声設定の読み込み失敗: " + e.message, false);
         }
@@ -813,6 +899,7 @@
               tts_provider: getVal("voice-tts_provider"),
               irodori_caption: getVal("voice-irodori_caption"),
               irodori_base_style: getVal("voice-irodori_base_style"),
+              voice_sample_id: selectedSampleId,
             }),
           });
           if (!resp.ok) {
@@ -823,6 +910,8 @@
           setVal("voice-tts_provider", v.tts_provider);
           setVal("voice-irodori_caption", v.irodori_caption);
           setVal("voice-irodori_base_style", v.irodori_base_style);
+          selectedSampleId = v.voice_sample_id || null;
+          renderVoiceSamples();
           toast("音声設定を保存しました", true);
         } catch (e) {
           toast("保存失敗: " + e.message, false);
@@ -863,7 +952,7 @@
       initTabs();
       initDevices();
       loadDevice();
-      loadVoice();
+      loadVoiceSamples().then(loadVoice);
     </script>
   </body>
 </html>

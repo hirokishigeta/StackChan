@@ -7,6 +7,7 @@ presentation layer never constructs concretes directly.
 from __future__ import annotations
 
 from app.application.ports.settings_repository import SettingsRepository
+from app.application.ports.voice_sample_repository import VoiceSampleRepository
 from app.application.use_cases.detect_attention import DetectAttentionUseCase
 from app.application.use_cases.manage_server_settings import ManageServerSettingsUseCase
 from app.application.use_cases.manage_settings import ManageSettingsUseCase
@@ -59,6 +60,10 @@ def get_settings_use_case() -> ManageSettingsUseCase:
 
 def get_server_settings_use_case() -> ManageServerSettingsUseCase:
     return get_container().server_settings_use_case
+
+
+def get_voice_sample_repository() -> VoiceSampleRepository:
+    return get_container().voice_sample_repository
 
 
 def get_event_publisher() -> InMemoryBotEventPublisher:
