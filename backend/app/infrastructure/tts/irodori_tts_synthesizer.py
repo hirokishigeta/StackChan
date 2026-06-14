@@ -182,11 +182,16 @@ class IrodoriTtsSynthesizer(SpeechSynthesizer):
 
         styled = style_text(text=text, emotion=emotion, base_style=base_style)
         reference = selected_reference or self._settings.irodori_reference_wav_path or None
-        caption = caption_value or None
+        # Production policy (owner decision): caption is used only when *creating*
+        # a reference voice. When a reference wav is set we clone it with NO
+        # caption, because mixing caption + ref drifts the timbre between turns;
+        # ref-only cloning is the most stable. Caption only applies in the
+        # no-ref path (and at ref-generation time, which passes a caption).
+        caption = None if reference is not None else (caption_value or None)
         # Fix the sampling seed so the voice (speaker timbre) is consistent across
-        # turns. With no reference wav, VoiceDesign samples a fresh speaker each
-        # call when seed is None, which makes the voice drift between replies; a
-        # fixed seed pins it while the caption still drives the style.
+        # turns (esp. for the no-ref path, where VoiceDesign otherwise samples a
+        # fresh speaker each call). Cloning a reference also benefits from a fixed
+        # seed for deterministic prosody.
         seed = self._settings.irodori_seed
         try:
             result = runtime.synthesize(
