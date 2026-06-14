@@ -34,7 +34,9 @@ _RESPONSE_FORMAT_INSTRUCTION = (
     "emotion is one of: neutral, happy, sad, angry, curious, surprised, sleepy. "
     "Set end_conversation to true ONLY when the conversation has clearly and "
     "naturally finished — e.g. the user says goodbye/thanks-that's-all, or there "
-    "is nothing left to do. Otherwise set it to false so we keep listening."
+    "is nothing left to do. Otherwise set it to false so we keep listening. "
+    "When ending, give a brief, warm farewell and gently invite the user to call "
+    "you again by name if they need anything (例:「何かあったら呼んでね」)."
 )
 
 # Type of the injectable client factory: () -> AsyncClient.

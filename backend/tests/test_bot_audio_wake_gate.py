@@ -93,6 +93,8 @@ def test_gate_engages_on_wake_word_and_runs_full_flow(
         ws.send_bytes(b"\x00" * 320)
         ws.send_json({"type": "listen", "state": "stop"})
         assert ws.receive_json() == {"type": "stt", "text": "ねえスタックチャン、元気？"}
+        # Engaging sends the engagement-state signal (for the indicator color).
+        assert ws.receive_json() == {"type": "wake", "state": "engaged"}
         assert ws.receive_json() == {"type": "llm", "emotion": "happy"}
         assert ws.receive_json() == {"type": "tts", "state": "start"}
         assert ws.receive_json()["state"] == "sentence_start"
@@ -115,7 +117,8 @@ def test_once_engaged_following_non_wake_utterance_is_processed(
         # First utterance engages.
         ws.send_bytes(b"\x00" * 320)
         ws.send_json({"type": "listen", "state": "stop"})
-        for expected in ("stt", "llm", "tts", "tts", "tts"):
+        # First turn also emits the engagement signal ("wake") right after stt.
+        for expected in ("stt", "wake", "llm", "tts", "tts", "tts"):
             assert ws.receive_json()["type"] == expected
         # Second utterance has no wake word but should be processed (engaged).
         asr.text = "それで、続きの話なんだけど"
