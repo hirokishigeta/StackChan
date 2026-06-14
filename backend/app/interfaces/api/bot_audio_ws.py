@@ -424,14 +424,15 @@ class BotAudioHandler:
         # mis-transcribed variant ("レルちゃん" for "ベルちゃん"). Rewrite it to
         # the canonical name so the LLM sees the proper name. Continuation turns
         # with no wake word are passed through unchanged.
+        fuzzy = self._settings.wake_fuzzy_max_dist
         agent_text = result.text
         if (
             self._settings.wake_word_gate_enabled
             and session.canonical_wake_word
-            and matches_wake_word(result.text, session.wake_words)
+            and matches_wake_word(result.text, session.wake_words, fuzzy)
         ):
             agent_text = canonicalize_wake_word(
-                result.text, session.wake_words, session.canonical_wake_word
+                result.text, session.wake_words, session.canonical_wake_word, fuzzy
             )
         await self._run_agent_turn(ws, session, agent_text)
 
@@ -470,7 +471,7 @@ class BotAudioHandler:
                 return True
             # Gone idle: fall through and require a wake word again.
             session.engaged = False
-        if matches_wake_word(text, session.wake_words):
+        if matches_wake_word(text, session.wake_words, self._settings.wake_fuzzy_max_dist):
             session.engaged = True
             session.last_activity = now
             return True

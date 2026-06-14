@@ -133,6 +133,15 @@ class AppSettings(BaseSettings):
     # transcript text — arbitrary Japanese, no extra model). Default OFF so the
     # current on-device-wake behavior is unchanged until the firmware is ready.
     wake_word_gate_enabled: bool = False
+    # Fuzzy (edit-distance) wake-word matching cap (ADR-0018). The backend STT
+    # mis-transcribes the wake word wildly (e.g. "ベルちゃん" heard as
+    # "ねるちゃん"/"ピルちゃん"), and enumerating every variant is infeasible. With
+    # this > 0 the gate also matches when a window of the transcript is within a
+    # length-scaled Levenshtein distance (1 for 3-4 char phrases, 2 for >=5;
+    # capped here) of a configured phrase, and the fuzzy span is corrected to the
+    # canonical name before the agent sees it. Short phrases (<=2 chars) stay
+    # exact-only regardless. 0 disables fuzzy entirely (exact/substring behavior).
+    wake_fuzzy_max_dist: int = 2
     # Once engaged, the conversation stays open without re-saying the wake word
     # until this much wall-clock idle time passes between processed turns; after
     # that the gate disengages and the next utterance must include a wake word.
