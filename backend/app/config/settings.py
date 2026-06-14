@@ -116,6 +116,11 @@ class AppSettings(BaseSettings):
     # Barge-in still works: the device sends an explicit `abort`/`listen` control
     # (not gated here). Set False only on hardware with reliable AEC.
     tts_half_duplex: bool = True
+    # Keep the half-duplex mic gate closed this long AFTER tts.stop. The device
+    # buffers downlink audio and keeps playing past tts.stop, so reopening the
+    # mic immediately captures that tail as echo (no device AEC) — seen as a
+    # doubled/garbled next utterance. Should cover the device's buffer depth.
+    tts_postroll_gate_ms: int = 1500
 
     # Downlink (server -> device) audio_params returned in the server hello.
     # These values are negotiated so firmware (#5) can rely on them; the
