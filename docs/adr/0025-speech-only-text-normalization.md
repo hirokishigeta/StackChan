@@ -1,6 +1,6 @@
 # ADR-0025: 発話テキストのクリーン化は StackChan 側の責務とする
 
-- Status: Accepted
+- Status: Superseded by ADR-0027（決定的後処理レイヤーを廃止しプロンプトのみに）
 - Date: 2026-06-14
 - 関連: ADR-0021 (文単位TTS) / ADR-0024 (HermesAgent) / design-spec §11
 
