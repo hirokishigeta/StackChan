@@ -41,6 +41,7 @@ from app.application.ports.speech_synthesizer import SpeechSynthesisError, Speec
 from app.config.settings import AppSettings
 from app.di_container import container as container_module
 from app.domain.agent.entities import AgentProfile
+from app.domain.speech.echo import is_echo_of
 from app.domain.speech.entities import ConversationTurnConfig, SpeechRecognitionConfig
 from app.domain.speech.value_objects import AudioFormat
 from app.domain.wakeword.value_objects import canonicalize_wake_word, matches_wake_word
@@ -136,6 +137,10 @@ class _Session:
     end_words: tuple[str, ...] = ()
     engaged: bool = False
     last_activity: float = 0.0
+    # Text of the bot's most recent reply, kept so we can drop a recognized
+    # utterance that is just that reply echoed back into the mic (no device AEC,
+    # ADR-0028). Cleared implicitly by being overwritten each reply.
+    last_reply_text: str = ""
     # Last engagement state signaled to the device (for the indicator color):
     # None = not yet sent, True = engaged (conversing), False = wake-waiting.
     engaged_signaled: bool | None = None
@@ -428,6 +433,14 @@ class BotAudioHandler:
         if not result.text:
             await ws.send_json({"type": "tts", "state": "stop"})
             return
+        # Echo guard (ADR-0028): drop the bot's own last reply captured by the mic
+        # (no device AEC) so an engaged conversation can't feed itself and degrade
+        # from the 2nd turn on. Done before the wake gate so echo never engages.
+        if session.last_reply_text and is_echo_of(result.text, session.last_reply_text):
+            logger.info("dropped echo of last reply: stt=%r", result.text)
+            session.vad.reset()
+            await ws.send_json({"type": "tts", "state": "stop"})
+            return
         # Backend wake-word gate (ADR-0014): decide whether this utterance should
         # engage the agent at all. Default-off; when disabled this is a no-op and
         # behavior is exactly as before.
@@ -571,6 +584,9 @@ class BotAudioHandler:
             session.speaking = False
             session.vad.reset()
             session.pcm_buffer = bytearray()
+            # Remember what we just said so the echo guard can drop it if the mic
+            # captures the playback tail (ADR-0028).
+            session.last_reply_text = reply.text
             # Refresh the idle clock to *now* (after the bot finished speaking).
             # The wake-gate idle timeout measures user silence; without this, a
             # long reply (e.g. 20s+ of TTS) burns most of the idle budget while

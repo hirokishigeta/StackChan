@@ -550,3 +550,84 @@ def test_binary_version3_frame_is_unwrapped(
         ws.send_json({"type": "listen", "state": "stop"})
         ws.receive_json()  # stt
     assert decoder.frames == [payload]
+
+
+class _SequenceAsr(SpeechRecognizer):
+    """Returns a preset transcript per recognize() call (for multi-turn tests)."""
+
+    def __init__(self, texts: list[str]) -> None:
+        self._texts = list(texts)
+        self.calls = 0
+
+    async def recognize(
+        self, *, audio: bytes, config: SpeechRecognitionConfig
+    ) -> SpeechRecognitionResult:
+        text = self._texts[self.calls] if self.calls < len(self._texts) else ""
+        self.calls += 1
+        return SpeechRecognitionResult(text=text, language=config.language, confidence=1.0)
+
+
+def test_echo_of_reply_is_dropped_and_not_sent_to_agent(
+    audio_ws_client_factory: Callable[..., TestClient],
+) -> None:
+    """2nd-turn echo of the bot's own reply must NOT become an agent turn
+    (regression for: conversation degrades after the 1st turn due to mic echo)."""
+    reply_text = "今日はとても良い天気ですね"
+    # Turn 1: a real question. Turn 2: the bot's reply echoed back into the mic.
+    asr = _SequenceAsr(["明日の天気は", reply_text])
+    agent = _FakeAgent(AgentReply(text=reply_text, emotion="neutral"))
+    client = audio_ws_client_factory(
+        gateway=agent,
+        speech_recognizer=asr,
+        audio_decoder=_FakeDecoder(),
+        speech_synthesizer=_SilentSynth(),
+    )
+    with _connect(client) as ws:
+        ws.send_json(_HELLO)
+        ws.receive_json()  # server hello
+
+        # Turn 1 (real): drive a manual turn and drain to tts.stop.
+        ws.send_json({"type": "listen", "state": "start", "mode": "manual"})
+        ws.send_bytes(b"\x11" * 320)
+        ws.send_json({"type": "listen", "state": "stop"})
+        assert ws.receive_json() == {"type": "stt", "text": "明日の天気は"}
+        while True:
+            msg = ws.receive_json()
+            if msg.get("type") == "tts" and msg.get("state") == "stop":
+                break
+
+        # Turn 2 (echo of the reply): must be dropped -> only a tts.stop, no stt.
+        ws.send_json({"type": "listen", "state": "start", "mode": "manual"})
+        ws.send_bytes(b"\x22" * 320)
+        ws.send_json({"type": "listen", "state": "stop"})
+        echo_resp = ws.receive_json()
+
+    assert echo_resp == {"type": "tts", "state": "stop"}  # dropped as echo
+    assert agent.messages == ["明日の天気は"]  # agent NOT called for the echo
+
+
+def test_real_followup_after_reply_still_reaches_agent(
+    audio_ws_client_factory: Callable[..., TestClient],
+) -> None:
+    """A genuine different 2nd utterance (not echo) must still reach the agent."""
+    asr = _SequenceAsr(["明日の天気は", "ありがとう、助かったよ"])
+    agent = _FakeAgent(AgentReply(text="今日はとても良い天気ですね", emotion="neutral"))
+    client = audio_ws_client_factory(
+        gateway=agent,
+        speech_recognizer=asr,
+        audio_decoder=_FakeDecoder(),
+        speech_synthesizer=_SilentSynth(),
+    )
+    with _connect(client) as ws:
+        ws.send_json(_HELLO)
+        ws.receive_json()
+        for _ in range(2):
+            ws.send_json({"type": "listen", "state": "start", "mode": "manual"})
+            ws.send_bytes(b"\x11" * 320)
+            ws.send_json({"type": "listen", "state": "stop"})
+            assert ws.receive_json()["type"] == "stt"
+            while True:
+                msg = ws.receive_json()
+                if msg.get("type") == "tts" and msg.get("state") == "stop":
+                    break
+    assert agent.messages == ["明日の天気は", "ありがとう、助かったよ"]
