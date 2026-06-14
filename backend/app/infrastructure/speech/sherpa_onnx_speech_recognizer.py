@@ -28,7 +28,14 @@ class SherpaOnnxConfigError(RuntimeError):
 
 
 class SherpaOnnxSpeechRecognizer(SpeechRecognizer):
-    """Offline recognizer using sherpa-onnx (transducer/paraformer/whisper)."""
+    """Offline recognizer using sherpa-onnx (transducer or NeMo CTC).
+
+    The model loader is selected purely by configuration, not by a new
+    provider: when ``sherpa_nemo_model_path`` is set the NeMo Parakeet (CTC)
+    loader is used (ADR-0018, higher Japanese accuracy); otherwise the existing
+    transducer loader is kept for back-compat. The ``recognize()`` waveform /
+    decode path is identical for both model types.
+    """
 
     def __init__(self, settings: AppSettings) -> None:
         self._settings = settings
@@ -46,17 +53,30 @@ class SherpaOnnxSpeechRecognizer(SpeechRecognizer):
             ) from exc
 
         tokens = self._settings.sherpa_tokens_path
+        nemo_model = self._settings.sherpa_nemo_model_path
+        if nemo_model and tokens:
+            # NeMo Parakeet (CTC) model: same runtime, different loader.
+            self._recognizer = sherpa_onnx.OfflineRecognizer.from_nemo_ctc(
+                model=nemo_model,
+                tokens=tokens,
+                num_threads=self._settings.sherpa_num_threads,
+                debug=False,
+            )
+            return self._recognizer
+
         encoder = self._settings.sherpa_encoder_path
         decoder = self._settings.sherpa_decoder_path
         joiner = self._settings.sherpa_joiner_path
         if not (tokens and encoder and decoder and joiner):
             raise SherpaOnnxConfigError(
                 "sherpa-onnx model paths are not configured. Set "
+                "STACKCHAN_SHERPA_NEMO_MODEL_PATH + STACKCHAN_SHERPA_TOKENS_PATH "
+                "for the NeMo Parakeet (CTC) model, or the transducer set "
                 "STACKCHAN_SHERPA_TOKENS_PATH / _ENCODER_PATH / _DECODER_PATH / "
                 "_JOINER_PATH (docs/backend-protocol.md §3.2)."
             )
-        # OfflineRecognizer keeps wiring minimal for #7-a; a streaming model can
-        # be swapped in later (TODO above).
+        # Transducer loader (back-compat). A streaming model can be swapped in
+        # later (TODO above).
         self._recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
             tokens=tokens,
             encoder=encoder,
