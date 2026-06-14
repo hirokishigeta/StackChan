@@ -1,4 +1,4 @@
-# ADR-0018: NeMo Parakeet (CTC) を sherpa-onnx ランタイム上の日本語 ASR モデルに採用
+# ADR-0019: NeMo Parakeet (CTC) を sherpa-onnx ランタイム上の日本語 ASR モデルに採用
 
 - Status: Accepted
 - Date: 2026-06-14
