@@ -113,6 +113,9 @@ class _Session:
     wake_words: tuple[str, ...] = ()
     engaged: bool = False
     last_activity: float = 0.0
+    # Last engagement state signaled to the device (for the indicator color):
+    # None = not yet sent, True = engaged (conversing), False = wake-waiting.
+    engaged_signaled: bool | None = None
     pcm_buffer: bytearray = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
@@ -402,6 +405,22 @@ class BotAudioHandler:
             return
         await self._run_agent_turn(ws, session, result.text)
 
+    async def _send_engagement_state(
+        self, ws: WebSocket, session: _Session, *, engaged: bool
+    ) -> None:
+        """Tell the device whether it's engaged (conversing) or wake-waiting.
+
+        Drives the device's status indicator color (engaged vs waiting). Only
+        meaningful in backend-wake mode, and only sent when the state changes.
+        Firmware handles ``{"type":"wake","state":"engaged"|"waiting"}``.
+        """
+        if not self._settings.wake_word_gate_enabled:
+            return
+        if session.engaged_signaled is engaged:
+            return
+        session.engaged_signaled = engaged
+        await ws.send_json({"type": "wake", "state": "engaged" if engaged else "waiting"})
+
     def _wake_gate_allows(self, session: _Session, text: str) -> bool:
         """Return True if ``text`` should be handed to the agent (ADR-0014).
 
@@ -442,6 +461,8 @@ class BotAudioHandler:
         logger.info("reply emotion=%s text=%r", reply.emotion, reply.text)
         if session.aborted:
             return
+        # Engaged (conversing) -> device shows the "in conversation" color.
+        await self._send_engagement_state(ws, session, engaged=True)
         # Emotion -> expression (xiaozhi `llm`, §2.2 -> firmware SetEmotion).
         await ws.send_json({"type": "llm", "emotion": reply.emotion})
         # Half-duplex: mark speaking across the whole tts.start..stop window so
@@ -469,17 +490,24 @@ class BotAudioHandler:
             session.speaking = False
             session.vad.reset()
             session.pcm_buffer = bytearray()
-        # Conversation lifecycle (§7): if the agent judged the conversation over,
-        # tell the device to stop listening so it returns to idle (wake-word
-        # wait) instead of auto-re-listening. The firmware honors a server-sent
-        # `listen stop` by going idle.
-        if reply.end_conversation:
-            logger.info("agent_turn: end_conversation -> stop listening")
-            session.listening = False
-            # Disengage the wake gate so the next session starts un-engaged and a
-            # wake word is required again (ADR-0014). No-op when the gate is off.
-            session.engaged = False
-            await ws.send_json({"type": "listen", "state": "stop"})
+        # Conversation lifecycle (§7): end when the agent judged it over OR the
+        # user said an end word. The bot has already spoken its (farewell) reply.
+        ended = reply.end_conversation or matches_wake_word(
+            user_text, tuple(self._settings.conversation_end_words)
+        )
+        if ended:
+            session.engaged = False  # disengage the wake gate (ADR-0014)
+            if self._settings.wake_word_gate_enabled:
+                # Backend-wake / always-listen: do NOT stop the stream. Just
+                # return to "wake waiting" — the next turn needs the wake word
+                # again. Keeps the device listening so it can be called back.
+                logger.info("agent_turn: conversation end -> wake-waiting")
+                await self._send_engagement_state(ws, session, engaged=False)
+            else:
+                # Legacy on-device-wake: stop listening so the device idles.
+                logger.info("agent_turn: end_conversation -> stop listening")
+                session.listening = False
+                await ws.send_json({"type": "listen", "state": "stop"})
 
     def _synthesize_resample(self, reply: AgentReply, downlink: AudioFormat) -> bytes | None:
         """Synthesize + resample to the downlink rate (runs in a worker thread).

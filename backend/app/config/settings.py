@@ -133,6 +133,21 @@ class AppSettings(BaseSettings):
     # until this much wall-clock idle time passes between processed turns; after
     # that the gate disengages and the next utterance must include a wake word.
     wake_idle_timeout_ms: int = 30000
+    # End-of-conversation words: while engaged, an utterance containing any of
+    # these ends the conversation (in addition to the agent's own end_conversation
+    # judgment). The bot gives a brief farewell, then disengages and returns to
+    # wake-waiting (next turn needs the wake word again). Matched on STT text.
+    conversation_end_words: list[str] = [
+        "ばいばい",
+        "バイバイ",
+        "またね",
+        "じゃあね",
+        "おやすみ",
+        "もういいよ",
+        "もう大丈夫",
+        "終わりで",
+        "またあとで",
+    ]
 
     # Downlink (server -> device) audio_params returned in the server hello.
     # These values are negotiated so firmware (#5) can rely on them; the
