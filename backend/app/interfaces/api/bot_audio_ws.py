@@ -406,6 +406,14 @@ class BotAudioHandler:
             await ws.send_json({"type": "tts", "state": "sentence_start", "text": reply.text})
             await self._send_tts_audio(ws, session, reply)
             await ws.send_json({"type": "tts", "state": "stop"})
+            # Post-roll cooldown: the device keeps playing its buffered audio for
+            # a short while AFTER tts.stop (downlink is paced ~real-time but the
+            # device buffers ahead), so reopening the mic immediately lets that
+            # tail echo back in (no device AEC) — which got captured as a bogus
+            # next utterance ("こんにちはこんにちは"). Keep the half-duplex gate
+            # closed for the cooldown so the tail drains first.
+            if not session.aborted and self._settings.tts_postroll_gate_ms > 0:
+                await asyncio.sleep(self._settings.tts_postroll_gate_ms / 1000.0)
         finally:
             session.speaking = False
             session.vad.reset()
