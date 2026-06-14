@@ -28,6 +28,19 @@ class SynthesizedAudio:
 
 
 @dataclass(frozen=True)
+class VoiceSample:
+    """A pre-generated, selectable reference voice (ADR-0012).
+
+    Each sample is one wav on disk; ``id`` is its filename stem and ``label`` is
+    a human-friendly name (defaults to the stem, optionally overridden by sidecar
+    metadata). Selecting a sample fixes the cloned timbre of the TTS voice.
+    """
+
+    id: str
+    label: str
+
+
+@dataclass(frozen=True)
 class AudioFormat:
     """Negotiated audio frame parameters (docs/backend-protocol.md §3).
 

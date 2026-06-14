@@ -167,16 +167,21 @@ class IrodoriTtsSynthesizer(SpeechSynthesizer):
 
         # Read caption / base_style from the runtime voice config when wired
         # (dashboard override, ADR-0009); else fall back to AppSettings defaults.
+        # Reference wav precedence (ADR-0012): the selected voice sample's wav
+        # (cloned to fix the timbre) -> the static irodori_reference_wav_path ->
+        # None (no_ref). Resolved per-call from the runtime voice config.
+        selected_reference: str | None = None
         if self._voice_config is not None:
             voice = self._voice_config.current_voice()
             base_style = voice.irodori_base_style
             caption_value = voice.irodori_caption
+            selected_reference = self._voice_config.selected_reference_wav()
         else:
             base_style = self._settings.irodori_base_style
             caption_value = self._settings.irodori_caption
 
         styled = style_text(text=text, emotion=emotion, base_style=base_style)
-        reference = self._settings.irodori_reference_wav_path or None
+        reference = selected_reference or self._settings.irodori_reference_wav_path or None
         caption = caption_value or None
         # Fix the sampling seed so the voice (speaker timbre) is consistent across
         # turns. With no reference wav, VoiceDesign samples a fresh speaker each

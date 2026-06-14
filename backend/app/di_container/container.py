@@ -20,6 +20,7 @@ from app.application.ports.settings_repository import SettingsRepository
 from app.application.ports.speech_recognizer import SpeechRecognizer
 from app.application.ports.speech_synthesizer import SpeechSynthesizer
 from app.application.ports.vision_recognizer import VisionRecognizer
+from app.application.ports.voice_sample_repository import VoiceSampleRepository
 from app.application.ports.wakeword_detector import WakeWordDetector
 from app.application.use_cases.detect_attention import SessionStore
 from app.application.use_cases.manage_server_settings import ManageServerSettingsUseCase
@@ -27,6 +28,9 @@ from app.config.settings import AppSettings, get_settings
 from app.infrastructure.agent.registry import build_agent_gateway
 from app.infrastructure.audio.encoder_registry import build_audio_encoder
 from app.infrastructure.audio.registry import build_audio_decoder
+from app.infrastructure.persistence.filesystem_voice_sample_repository import (
+    FilesystemVoiceSampleRepository,
+)
 from app.infrastructure.persistence.sqlite_server_settings_repository import (
     SqliteServerSettingsRepository,
 )
@@ -50,8 +54,13 @@ class Container:
         self._server_settings_repository: ServerSettingsRepository = SqliteServerSettingsRepository(
             settings.database_url
         )
+        # Pre-generated reference voices listed from STACKCHAN_VOICE_SAMPLES_DIR
+        # (ADR-0012). Selecting one fixes the cloned TTS timbre.
+        self._voice_sample_repository: VoiceSampleRepository = FilesystemVoiceSampleRepository(
+            settings.voice_samples_dir
+        )
         self._server_settings_use_case = ManageServerSettingsUseCase(
-            self._server_settings_repository, settings
+            self._server_settings_repository, settings, self._voice_sample_repository
         )
         # Provider resolved via the registry (no if-branching); default is
         # OpenAICompatible (design-spec §11.3 / CLAUDE.md).
@@ -89,6 +98,10 @@ class Container:
     @property
     def server_settings_repository(self) -> ServerSettingsRepository:
         return self._server_settings_repository
+
+    @property
+    def voice_sample_repository(self) -> VoiceSampleRepository:
+        return self._voice_sample_repository
 
     @property
     def server_settings_use_case(self) -> ManageServerSettingsUseCase:

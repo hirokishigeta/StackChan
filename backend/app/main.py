@@ -24,6 +24,7 @@ from app.interfaces.api import (
     settings_routes,
     speech_routes,
     vision_routes,
+    voice_sample_routes,
 )
 from app.interfaces.dashboard import routes as dashboard_routes
 
@@ -77,6 +78,7 @@ def create_app() -> FastAPI:
     app.include_router(vision_routes.router)
     app.include_router(settings_routes.router)
     app.include_router(server_settings_routes.router)
+    app.include_router(voice_sample_routes.router)
     app.include_router(dashboard_routes.router)
 
     @app.get("/health", tags=["health"])

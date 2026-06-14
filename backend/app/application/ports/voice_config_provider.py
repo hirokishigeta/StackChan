@@ -20,3 +20,13 @@ class VoiceConfigProvider(ABC):
     def current_voice(self) -> ServerVoiceSettings:
         """Return the effective voice settings (override over env defaults)."""
         raise NotImplementedError
+
+    @abstractmethod
+    def selected_reference_wav(self) -> str | None:
+        """Resolve the selected voice sample's wav path, or ``None`` (ADR-0012).
+
+        ``None`` means no sample is selected (or it no longer resolves); the
+        synthesizer then falls back to ``irodori_reference_wav_path`` else
+        no_ref.
+        """
+        raise NotImplementedError

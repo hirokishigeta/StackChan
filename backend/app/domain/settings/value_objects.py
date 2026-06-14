@@ -28,3 +28,8 @@ class ServerVoiceSettings:
     tts_provider: str = "dummy"
     irodori_caption: str = ""
     irodori_base_style: str = ""
+    # Selected pre-generated voice sample (filename stem). When set, the
+    # synthesizer clones this sample's wav as its reference voice so the timbre
+    # is fixed (ADR-0012). ``None`` means no sample is selected: the synthesizer
+    # falls back to ``irodori_reference_wav_path`` else no_ref.
+    voice_sample_id: str | None = None
