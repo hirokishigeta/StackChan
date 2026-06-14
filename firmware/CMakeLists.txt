@@ -2,7 +2,7 @@
 # CMakeLists in this exact order for cmake to work correctly
 cmake_minimum_required(VERSION 3.16)
 
-set(PROJECT_VER "1.6.4")
+set(PROJECT_VER "1.6.5")
 add_definitions(-DFIRMWARE_VERSION=\"${PROJECT_VER}\")
 
 # StackChan: backend-side wake word. The device auto-listens and streams to the
