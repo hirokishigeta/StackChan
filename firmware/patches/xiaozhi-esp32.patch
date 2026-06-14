@@ -1,5 +1,5 @@
 diff --git a/main/application.cc b/main/application.cc
-index d69d43d..94ae701 100644
+index d69d43d..891778e 100644
 --- a/main/application.cc
 +++ b/main/application.cc
 @@ -1,25 +1,24 @@
@@ -620,8 +620,23 @@ index d69d43d..94ae701 100644
              // Play popup sound after ResetDecoder (in EnableVoiceProcessing) has been called
              if (play_popup_on_listening_) {
                  play_popup_on_listening_ = false;
-@@ -915,6 +955,10 @@ void Application::HandleStateChangedEvent() {
+@@ -911,10 +951,25 @@ void Application::HandleStateChangedEvent() {
+ 
+             if (listening_mode_ != kListeningModeRealtime) {
+                 audio_service_.EnableVoiceProcessing(false);
++#if defined(CONFIG_STACKCHAN_BACKEND_WAKE) && CONFIG_STACKCHAN_BACKEND_WAKE
++                // Backend wake: never run the device wakenet during playback.
++                // It has no AEC, so it false-triggers on the bot's own TTS voice
++                // and aborts speech mid-sentence (observed: "Wake word detected:
++                // Hi,Stack Chan" -> Abort speaking, heard as a popup + cut-off),
++                // and it runs in the high-priority input task, starving the opus
++                // decoder and crackling the I2S. Wake detection is fully
++                // backend-side, so keep it off.
++                audio_service_.EnableWakeWordDetection(false);
++#else
+                 // Only AFE wake word can be detected in speaking mode
                  audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
++#endif
              }
              audio_service_.ResetDecoder();
 +            // Pre-enable the output codec/amp on entering Speaking (tts start)
@@ -631,7 +646,7 @@ index d69d43d..94ae701 100644
              break;
          case kDeviceStateWifiConfiguring:
              audio_service_.EnableVoiceProcessing(false);
-@@ -942,6 +986,33 @@ void Application::AbortSpeaking(AbortReason reason) {
+@@ -942,6 +997,33 @@ void Application::AbortSpeaking(AbortReason reason) {
      }
  }
  
@@ -665,7 +680,7 @@ index d69d43d..94ae701 100644
  void Application::SetListeningMode(ListeningMode mode) {
      listening_mode_ = mode;
      SetDeviceState(kDeviceStateListening);
-@@ -978,7 +1049,8 @@ bool Application::UpgradeFirmware(const std::string& url, const std::string& ver
+@@ -978,7 +1060,8 @@ bool Application::UpgradeFirmware(const std::string& url, const std::string& ver
      }
      ESP_LOGI(TAG, "Starting firmware upgrade from URL: %s", upgrade_url.c_str());
  
@@ -675,7 +690,7 @@ index d69d43d..94ae701 100644
      vTaskDelay(pdMS_TO_TICKS(3000));
  
      SetDeviceState(kDeviceStateUpgrading);
-@@ -1000,17 +1072,19 @@ bool Application::UpgradeFirmware(const std::string& url, const std::string& ver
+@@ -1000,17 +1083,19 @@ bool Application::UpgradeFirmware(const std::string& url, const std::string& ver
  
      if (!upgrade_success) {
          // Upgrade failed, restart audio service and continue running
@@ -700,7 +715,7 @@ index d69d43d..94ae701 100644
          Reboot();
          return true;
      }
-@@ -1022,25 +1096,21 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
+@@ -1022,25 +1107,21 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
      }
  
      auto state = GetDeviceState();
@@ -730,7 +745,7 @@ index d69d43d..94ae701 100644
          Schedule([this]() {
              if (protocol_) {
                  protocol_->CloseAudioChannel();
-@@ -1081,18 +1151,18 @@ void Application::SetAecMode(AecMode mode) {
+@@ -1081,18 +1162,18 @@ void Application::SetAecMode(AecMode mode) {
          auto& board = Board::GetInstance();
          auto display = board.GetDisplay();
          switch (aec_mode_) {
@@ -761,7 +776,7 @@ index d69d43d..94ae701 100644
          }
  
          // If the AEC mode is changed, close the audio channel
-@@ -1102,9 +1172,7 @@ void Application::SetAecMode(AecMode mode) {
+@@ -1102,9 +1183,7 @@ void Application::SetAecMode(AecMode mode) {
      });
  }
  
@@ -772,7 +787,7 @@ index d69d43d..94ae701 100644
  
  void Application::ResetProtocol() {
      Schedule([this]() {
-@@ -1116,4 +1184,3 @@ void Application::ResetProtocol() {
+@@ -1116,4 +1195,3 @@ void Application::ResetProtocol() {
          protocol_.reset();
      });
  }
